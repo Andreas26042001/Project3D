@@ -23,6 +23,9 @@ include_directories(3rdParty/glad/include)
 set(SOURCES
     src/main.cpp
     src/Game.cpp
+    src/Game_Render.cpp
+    src/Game_Physics.cpp
+    src/GameInternal.cpp
     src/Light.cpp
     3rdParty/glad/src/glad.c
 )
