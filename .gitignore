@@ -1,0 +1,28 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Executables
+*.exe
+*.out
+MonProjetOpenGL
+
+# Temporary files
+*.tmp
+*.log
+
+# Dependencies (if not using submodules)
+3rdParty/
+!3rdParty/README.mdOneDrive_1_13-05-2026/
+*.pdf

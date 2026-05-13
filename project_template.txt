@@ -1,0 +1,622 @@
+# Template Projet INFO-H-502 - Structure de Base
+# Copiez-collez ce contenu dans un nouveau projet VSCode
+# Date: 16 avril 2026
+
+## Structure des Dossiers à Créer :
+```
+mon_projet_opengl/
+├── CMakeLists.txt          # Configuration CMake
+├── README.md               # Documentation du projet
+├── assets/                 # Ressources (modèles, textures)
+│   ├── models/            # Fichiers .obj
+│   └── textures/           # Images .jpg/.png
+├── include/               # Headers
+│   ├── camera.h           # Classe caméra
+│   ├── shader.h           # Classe shader
+│   └── object.h           # Classe pour charger modèles
+├── src/                   # Code source
+│   ├── main.cpp           # Point d'entrée
+│   ├── Game.cpp           # Logique de jeu
+│   ├── Game.h
+│   ├── Light.cpp          # Système d'éclairage
+│   └── Light.h
+├── shaders/               # Shaders GLSL
+│   ├── basic.vert
+│   ├── basic.frag
+│   ├── phong.vert
+│   ├── phong.frag
+│   ├── cubemap.vert
+│   └── cubemap.frag
+└── build/                 # Dossier de build (généré)
+```
+
+---
+
+## 1. CMakeLists.txt (Racine du projet)
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(MonProjetOpenGL VERSION 1.0)
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Dépendances
+find_package(OpenGL REQUIRED)
+
+# GLFW
+find_package(glfw3 QUIET)
+if(NOT glfw3_FOUND)
+    add_subdirectory(3rdParty/glfw)
+endif()
+
+# GLM et STB (si pas déjà inclus)
+include_directories(include)
+include_directories(3rdParty/glm)
+include_directories(3rdParty/stb)
+
+# Sources
+set(SOURCES
+    src/main.cpp
+    src/Game.cpp
+    src/Light.cpp
+)
+
+# Exécutable
+add_executable(${PROJECT_NAME} ${SOURCES})
+
+# Liens
+target_link_libraries(${PROJECT_NAME}
+    PUBLIC OpenGL::GL
+    PUBLIC glfw
+    PUBLIC glad
+)
+
+# Copie des shaders et assets
+configure_file(shaders/basic.vert ${CMAKE_BINARY_DIR}/shaders/basic.vert COPYONLY)
+configure_file(shaders/basic.frag ${CMAKE_BINARY_DIR}/shaders/basic.frag COPYONLY)
+# ... ajouter autres shaders
+```
+
+---
+
+## 2. include/shader.h
+
+```cpp
+#ifndef SHADER_H
+#define SHADER_H
+
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+
+class Shader
+{
+public:
+    unsigned int ID;
+
+    Shader(const char* vertexPath, const char* fragmentPath);
+    Shader(std::string vShaderCode, std::string fShaderCode);
+
+    void use();
+    void setBool(const std::string &name, bool value) const;
+    void setInt(const std::string &name, int value) const;
+    void setFloat(const std::string &name, float value) const;
+    void setVec2(const std::string &name, const glm::vec2 &value) const;
+    void setVec2(const std::string &name, float x, float y) const;
+    void setVec3(const std::string &name, const glm::vec3 &value) const;
+    void setVec3(const std::string &name, float x, float y, float z) const;
+    void setVec4(const std::string &name, const glm::vec4 &value) const;
+    void setVec4(const std::string &name, float x, float y, float z, float w) const;
+    void setMat2(const std::string &name, const glm::mat2 &mat) const;
+    void setMat3(const std::string &name, const glm::mat3 &mat) const;
+    void setMat4(const std::string &name, const glm::mat4 &mat) const;
+
+private:
+    void checkCompileErrors(GLuint shader, std::string type);
+};
+
+#endif
+```
+
+---
+
+## 3. include/camera.h
+
+```cpp
+#ifndef CAMERA_H
+#define CAMERA_H
+
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <vector>
+
+enum Camera_Movement {
+    FORWARD,
+    BACKWARD,
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN
+};
+
+const float YAW = -90.0f;
+const float PITCH = 0.0f;
+const float SPEED = 2.5f;
+const float SENSITIVITY = 0.1f;
+const float ZOOM = 45.0f;
+
+class Camera
+{
+public:
+    glm::vec3 Position;
+    glm::vec3 Front;
+    glm::vec3 Up;
+    glm::vec3 Right;
+    glm::vec3 WorldUp;
+
+    float Yaw;
+    float Pitch;
+
+    float MovementSpeed;
+    float MouseSensitivity;
+    float Zoom;
+
+    Camera(glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f),
+           glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f),
+           float yaw = YAW, float pitch = PITCH);
+
+    Camera(float posX, float posY, float posZ,
+           float upX, float upY, float upZ,
+           float yaw, float pitch);
+
+    glm::mat4 GetViewMatrix();
+    glm::mat4 GetProjectionMatrix();
+
+    void ProcessKeyboard(Camera_Movement direction, float deltaTime);
+    void ProcessMouseMovement(float xoffset, float yoffset, GLboolean constrainPitch = true);
+    void ProcessMouseScroll(float yoffset);
+
+private:
+    void updateCameraVectors();
+};
+
+#endif
+```
+
+---
+
+## 4. include/object.h
+
+```cpp
+#ifndef OBJECT_H
+#define OBJECT_H
+
+#include <glad/glad.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <string>
+#include <vector>
+
+struct Vertex {
+    glm::vec3 Position;
+    glm::vec3 Normal;
+    glm::vec2 TexCoords;
+};
+
+struct Texture {
+    unsigned int id;
+    std::string type;
+    std::string path;
+};
+
+class Object {
+public:
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+    std::vector<Texture> textures;
+
+    unsigned int VAO, VBO, EBO;
+
+    Object(const char* path);
+    ~Object();
+
+    void makeObject(class Shader& shader, bool hasNormals = true);
+    void draw();
+
+private:
+    void loadOBJ(const char* path);
+    void setupBuffers();
+};
+
+#endif
+```
+
+---
+
+## 5. src/main.cpp
+
+```cpp
+#include <iostream>
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#include "shader.h"
+#include "camera.h"
+#include "object.h"
+#include "Game.h"
+
+const unsigned int SCR_WIDTH = 800;
+const unsigned int SCR_HEIGHT = 600;
+
+Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
+float lastX = SCR_WIDTH / 2.0f;
+float lastY = SCR_HEIGHT / 2.0f;
+bool firstMouse = true;
+
+float deltaTime = 0.0f;
+float lastFrame = 0.0f;
+
+void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+void processInput(GLFWwindow* window);
+
+int main()
+{
+    // Initialize GLFW
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Mon Projet OpenGL", NULL, NULL);
+    if (window == NULL) {
+        std::cout << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        std::cout << "Failed to initialize GLAD" << std::endl;
+        return -1;
+    }
+
+    glEnable(GL_DEPTH_TEST);
+
+    // Create game instance
+    Game game;
+
+    // Render loop
+    while (!glfwWindowShouldClose(window)) {
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        processInput(window);
+
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // Update and render game
+        game.Update(deltaTime);
+        game.Render(camera);
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    glfwTerminate();
+    return 0;
+}
+
+void processInput(GLFWwindow* window) {
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        camera.ProcessKeyboard(FORWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        camera.ProcessKeyboard(BACKWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        camera.ProcessKeyboard(LEFT, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        camera.ProcessKeyboard(RIGHT, deltaTime);
+}
+
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    glViewport(0, 0, width, height);
+}
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (firstMouse) {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos;
+
+    lastX = xpos;
+    lastY = ypos;
+
+    camera.ProcessMouseMovement(xoffset, yoffset);
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    camera.ProcessMouseScroll(yoffset);
+}
+```
+
+---
+
+## 6. src/Game.h
+
+```cpp
+#ifndef GAME_H
+#define GAME_H
+
+#include <vector>
+#include "camera.h"
+#include "object.h"
+#include "Light.h"
+
+class Game {
+public:
+    Game();
+    ~Game();
+
+    void Update(float deltaTime);
+    void Render(Camera& camera);
+
+private:
+    std::vector<Object*> objects;
+    std::vector<Light*> lights;
+
+    // Shaders
+    Shader* basicShader;
+    Shader* phongShader;
+    Shader* cubemapShader;
+
+    // Game state
+    float time;
+};
+
+#endif
+```
+
+---
+
+## 7. src/Game.cpp
+
+```cpp
+#include "Game.h"
+#include "shader.h"
+#include "camera.h"
+#include "object.h"
+#include "Light.h"
+
+Game::Game() : time(0.0f) {
+    // Initialize shaders
+    basicShader = new Shader("shaders/basic.vert", "shaders/basic.frag");
+    phongShader = new Shader("shaders/phong.vert", "shaders/phong.frag");
+    cubemapShader = new Shader("shaders/cubemap.vert", "shaders/cubemap.frag");
+
+    // Load objects
+    Object* cube = new Object("assets/models/cube.obj");
+    cube->makeObject(*basicShader);
+    objects.push_back(cube);
+
+    // Setup lights
+    Light* mainLight = new Light(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+    lights.push_back(mainLight);
+
+    // Enable depth testing
+    glEnable(GL_DEPTH_TEST);
+}
+
+Game::~Game() {
+    for (auto obj : objects) delete obj;
+    for (auto light : lights) delete light;
+    delete basicShader;
+    delete phongShader;
+    delete cubemapShader;
+}
+
+void Game::Update(float deltaTime) {
+    time += deltaTime;
+
+    // Update game logic here
+    // Move objects, update lights, etc.
+}
+
+void Game::Render(Camera& camera) {
+    // Clear buffers
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Get matrices
+    glm::mat4 view = camera.GetViewMatrix();
+    glm::mat4 projection = camera.GetProjectionMatrix();
+
+    // Render objects
+    for (size_t i = 0; i < objects.size(); ++i) {
+        glm::mat4 model = glm::mat4(1.0f);
+        // Position object
+        model = glm::translate(model, glm::vec3(i * 2.0f, 0.0f, 0.0f));
+
+        // Use appropriate shader
+        Shader* currentShader = basicShader;
+        currentShader->use();
+
+        // Set uniforms
+        currentShader->setMat4("model", model);
+        currentShader->setMat4("view", view);
+        currentShader->setMat4("projection", projection);
+
+        // Set lighting uniforms if using phong shader
+        if (currentShader == phongShader && !lights.empty()) {
+            currentShader->setVec3("lightPos", lights[0]->position);
+            currentShader->setVec3("lightColor", lights[0]->color);
+            currentShader->setVec3("viewPos", camera.Position);
+        }
+
+        objects[i]->draw();
+    }
+}
+```
+
+---
+
+## 8. src/Light.h
+
+```cpp
+#ifndef LIGHT_H
+#define LIGHT_H
+
+#include <glm/glm.hpp>
+
+class Light {
+public:
+    glm::vec3 position;
+    glm::vec3 color;
+    float ambientStrength;
+    float diffuseStrength;
+    float specularStrength;
+
+    Light(glm::vec3 pos = glm::vec3(0.0f, 0.0f, 0.0f),
+          glm::vec3 col = glm::vec3(1.0f, 1.0f, 1.0f),
+          float ambient = 0.1f,
+          float diffuse = 0.8f,
+          float specular = 1.0f);
+
+    void setUniforms(class Shader& shader, const std::string& prefix = "light");
+};
+
+#endif
+```
+
+---
+
+## 9. src/Light.cpp
+
+```cpp
+#include "Light.h"
+#include "shader.h"
+
+Light::Light(glm::vec3 pos, glm::vec3 col, float ambient, float diffuse, float specular)
+    : position(pos), color(col),
+      ambientStrength(ambient), diffuseStrength(diffuse), specularStrength(specular) {}
+
+void Light::setUniforms(Shader& shader, const std::string& prefix) {
+    shader.setVec3(prefix + ".position", position);
+    shader.setVec3(prefix + ".color", color);
+    shader.setFloat(prefix + ".ambient", ambientStrength);
+    shader.setFloat(prefix + ".diffuse", diffuseStrength);
+    shader.setFloat(prefix + ".specular", specularStrength);
+}
+```
+
+---
+
+## 10. Shaders de Base
+
+### shaders/basic.vert
+```glsl
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoords;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+out vec3 FragPos;
+out vec3 Normal;
+out vec2 TexCoords;
+
+void main() {
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    Normal = mat3(transpose(inverse(model))) * aNormal;
+    TexCoords = aTexCoords;
+
+    gl_Position = projection * view * vec4(FragPos, 1.0);
+}
+```
+
+### shaders/basic.frag
+```glsl
+#version 330 core
+out vec4 FragColor;
+
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoords;
+
+uniform vec3 objectColor;
+uniform vec3 lightColor;
+uniform vec3 lightPos;
+uniform vec3 viewPos;
+
+void main() {
+    // Ambient
+    float ambientStrength = 0.1;
+    vec3 ambient = ambientStrength * lightColor;
+
+    // Diffuse
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff * lightColor;
+
+    // Specular
+    float specularStrength = 0.5;
+    vec3 viewDir = normalize(viewPos - FragPos);
+    vec3 reflectDir = reflect(-lightDir, norm);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);
+    vec3 specular = specularStrength * spec * lightColor;
+
+    vec3 result = (ambient + diffuse + specular) * objectColor;
+    FragColor = vec4(result, 1.0);
+}
+```
+
+---
+
+## Instructions d'Installation
+
+1. **Créer la structure de dossiers** comme indiqué ci-dessus
+2. **Copier tous les fichiers** du template
+3. **Ajouter les dépendances** :
+   - GLFW (dans 3rdParty/glfw)
+   - GLAD (dans 3rdParty/glad)
+   - GLM (dans 3rdParty/glm)
+   - STB Image (dans 3rdParty/stb)
+4. **Configurer CMake** avec le CMakeLists.txt fourni
+5. **Ajouter des assets** dans assets/models/ et assets/textures/
+6. **Compiler et exécuter**
+
+Ce template couvre toutes les fonctionnalités de base requises pour le projet INFO-H-502.
