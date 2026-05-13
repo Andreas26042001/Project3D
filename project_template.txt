@@ -7,9 +7,12 @@
 mon_projet_opengl/
 ├── CMakeLists.txt          # Configuration CMake
 ├── README.md               # Documentation du projet
-├── assets/                 # Ressources (modèles, textures)
-│   ├── models/            # Fichiers .obj
+├── resources/              # Données chargées à l'exécution
+│   ├── glsl/               # Shaders GLSL
+│   ├── models/             # Fichiers .obj exportés
 │   └── textures/           # Images .jpg/.png
+├── assets/                 # Sources (Blender, etc.)
+│   └── blender/
 ├── include/               # Headers
 │   ├── camera.h           # Classe caméra
 │   ├── shader.h           # Classe shader
@@ -20,13 +23,6 @@ mon_projet_opengl/
 │   ├── Game.h
 │   ├── Light.cpp          # Système d'éclairage
 │   └── Light.h
-├── shaders/               # Shaders GLSL
-│   ├── basic.vert
-│   ├── basic.frag
-│   ├── phong.vert
-│   ├── phong.frag
-│   ├── cubemap.vert
-│   └── cubemap.frag
 └── build/                 # Dossier de build (généré)
 ```
 
@@ -65,6 +61,10 @@ set(SOURCES
 # Exécutable
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    "GAME_RESOURCE_DIR=\"${CMAKE_SOURCE_DIR}/resources\""
+)
+
 # Liens
 target_link_libraries(${PROJECT_NAME}
     PUBLIC OpenGL::GL
@@ -72,11 +72,7 @@ target_link_libraries(${PROJECT_NAME}
     PUBLIC glad
 )
 
-# Copie des shaders et assets
-configure_file(shaders/basic.vert ${CMAKE_BINARY_DIR}/shaders/basic.vert COPYONLY)
-configure_file(shaders/basic.frag ${CMAKE_BINARY_DIR}/shaders/basic.frag COPYONLY)
-# ... ajouter autres shaders
-```
+# Les fichiers sous resources/ sont lus à l'exécution via GAME_RESOURCE_DIR (chemin absolu).
 
 ---
 
@@ -419,14 +415,16 @@ private:
 #include "object.h"
 #include "Light.h"
 
+// Définir resourcePath() + GAME_RESOURCE_DIR comme dans le Game.cpp du dépôt (CMake injecte le chemin absolu vers resources/).
+
 Game::Game() : time(0.0f) {
     // Initialize shaders
-    basicShader = new Shader("shaders/basic.vert", "shaders/basic.frag");
-    phongShader = new Shader("shaders/phong.vert", "shaders/phong.frag");
-    cubemapShader = new Shader("shaders/cubemap.vert", "shaders/cubemap.frag");
+    basicShader = new Shader(resourcePath("glsl/basic.vert").c_str(), resourcePath("glsl/basic.frag").c_str());
+    phongShader = new Shader(resourcePath("glsl/phong.vert").c_str(), resourcePath("glsl/phong.frag").c_str());
+    cubemapShader = new Shader(resourcePath("glsl/cubemap.vert").c_str(), resourcePath("glsl/cubemap.frag").c_str());
 
     // Load objects
-    Object* cube = new Object("assets/models/cube.obj");
+    Object* cube = new Object(resourcePath("models/cube.obj").c_str());
     cube->makeObject(*basicShader);
     objects.push_back(cube);
 
@@ -543,7 +541,7 @@ void Light::setUniforms(Shader& shader, const std::string& prefix) {
 
 ## 10. Shaders de Base
 
-### shaders/basic.vert
+### resources/glsl/basic.vert
 ```glsl
 #version 330 core
 layout (location = 0) in vec3 aPos;
@@ -567,7 +565,7 @@ void main() {
 }
 ```
 
-### shaders/basic.frag
+### resources/glsl/basic.frag
 ```glsl
 #version 330 core
 out vec4 FragColor;
@@ -616,7 +614,7 @@ void main() {
    - GLM (dans 3rdParty/glm)
    - STB Image (dans 3rdParty/stb)
 4. **Configurer CMake** avec le CMakeLists.txt fourni
-5. **Ajouter des assets** dans assets/models/ et assets/textures/
+5. **Ajouter des assets** dans `resources/models/`, `resources/textures/` et des shaders dans `resources/glsl/`
 6. **Compiler et exécuter**
 
 Ce template couvre toutes les fonctionnalités de base requises pour le projet INFO-H-502.

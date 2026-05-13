@@ -23,18 +23,6 @@ public:
     float GetSupportHeightAtPosition(const glm::vec3& cameraPosition, float cameraRadius) const;
     void ResolveCameraCollisions(glm::vec3& cameraPosition, float cameraRadius) const;
     void UpdateMovablePillar(const glm::vec3& cameraPosition, float cameraRadius);
-    void IncreaseSphereReflectivity(float delta);
-    void DecreaseSphereReflectivity(float delta);
-    void IncreaseCubeRefractivity(float delta);
-    void DecreaseCubeRefractivity(float delta);
-    void IncreaseTopLight(float delta);
-    void DecreaseTopLight(float delta);
-    void IncreaseCornerLightRange(float delta);
-    void DecreaseCornerLightRange(float delta);
-    float GetSphereReflectivity() const;
-    float GetCubeRefractiveIndex() const;
-    float GetTopLightStrength() const;
-    float GetCornerLightRange() const;
     void ToggleCrosshair();
 
 private:
@@ -53,23 +41,14 @@ private:
         glm::vec3 center;
         glm::vec3 halfExtents;
         float radius;
+        bool canSupport = true;
     };
-    struct MirrorSurface {
-        glm::mat4 model;
-        glm::vec3 center;
-        glm::vec3 normal;
-        GLuint framebuffer;
-        GLuint colorTexture;
-        GLuint depthStencilRbo;
-    };
-
     std::vector<Object*> objects;
     std::vector<Light*> lights;
     std::vector<ExplosionParticle> explosionParticles;
     std::vector<glm::mat4> extraCubeModels;
     std::vector<glm::vec3> pillarBaseCenters;
     std::vector<SceneCollider> sceneColliders;
-    std::array<MirrorSurface, 2> mirrors;
     glm::vec3 centerPillarBaseCenter;
     float centerPillarHeight;
     float centerPillarHalfWidth;
@@ -92,13 +71,31 @@ private:
     float targetActivationTimer;
     float targetActivationDuration;
     bool targetActivated;
+    GLuint prismVAO;
+    GLuint prismVBO;
+    int prismVertexCount;
+    Shader* prismShader;
+    glm::vec3 prismCenter;
+    float prismRadius;
+    glm::vec3 prismDeflectDirection;
+    int deflectorPillarColliderIndex;
+    int deflectorPillarShadowIndex;
+    float deflectorPillarOffsetX;
+    float deflectorRailMin;
+    float deflectorRailMax;
+    float deflectorPillarHeight;
+    glm::mat4 deflectorRailModel;
+    glm::vec3 deflectorPillarBase;
+    glm::vec3 target2Position;
+    glm::mat4 target2ModelMatrix;
+    float target2ActivationTimer;
+    bool target2Activated;
+    glm::mat4 target1ModelMatrix;
 
     // Shaders
     Shader* phongShader;
     Shader* lampShader;
     Shader* cubemapShader;
-    Shader* envMapShader;
-    Shader* mirrorShader;
     Shader* crosshairShader;
     Shader* shadowDepthShader;
     Object* lightMarker;
@@ -106,8 +103,6 @@ private:
     GLuint skyboxVAO;
     GLuint skyboxVBO;
     GLuint cubemapTexture;
-    GLuint mirrorVAO;
-    GLuint mirrorVBO;
     GLuint crosshairVAO;
     GLuint crosshairVBO;
     GLuint groundDiffuseTexture;
@@ -130,8 +125,6 @@ private:
 
     // Game state
     float time;
-    float sphereReflectivity;
-    float cubeRefractiveIndex;
     bool lightProjectileActive;
     glm::vec3 lightProjectileStart;
     glm::vec3 lightProjectileDirection;
@@ -151,8 +144,6 @@ private:
     float lightLockAnimDuration;
     glm::vec3 lightLockSourcePos;
     glm::vec3 lightLockTargetPos;
-    float cubeCollisionHalfExtent;
-    float sphereCollisionRadius;
     float worldCollisionHalfExtent;
     float groundTopY;
     float topLightStrength;
@@ -163,14 +154,11 @@ private:
     bool edgeClipEnabled;
     std::array<glm::vec4, 4> edgeClipPlanes;
     bool crosshairVisible;
-    bool renderingHollowMirrorPass;
 
     void setupSkybox();
     void setupCrosshair();
     void renderSkybox(const glm::mat4& view, const glm::mat4& projection);
     void renderCrosshair();
-    void setupMirrors();
-    void renderMirrors(const glm::mat4& view, const glm::mat4& projection);
     void renderSceneOpaque(
         const glm::mat4& view,
         const glm::mat4& projection,
@@ -178,10 +166,6 @@ private:
         const glm::vec3& playerWorldPosition
     );
     void renderShadowMap();
-    glm::mat4 buildReflectedView(const Camera& camera, const MirrorSurface& mirror) const;
-    glm::vec3 reflectPointAcrossPlane(const glm::vec3& point, const glm::vec3& planePoint, const glm::vec3& planeNormal) const;
-    glm::vec3 reflectDirectionAcrossPlane(const glm::vec3& dir, const glm::vec3& planeNormal) const;
-    void renderMirrorReflection(const Camera& camera, int mirrorIndex, const glm::mat4& projection, int recursionDepth);
     void disableLightProjectile();
     void spawnLightExplosion(const glm::vec3& position);
     void updateExplosionParticles(float deltaTime);
@@ -197,13 +181,6 @@ private:
         glm::vec3& outHit,
         float& outDistance
     ) const;
-    bool resolveLightProjectileMirrorCollision(
-        const glm::vec3& currentPos,
-        const glm::vec3& targetPos,
-        glm::vec3& outPos,
-        glm::vec3& inOutDirection,
-        bool& absorbed
-    ) const;
     void disablePlacedLight();
     void resolvePlacedLightCollisions(glm::vec3& position, glm::vec3& velocity);
     void syncCarriedLight(const glm::vec3& cameraPosition, const glm::vec3& cameraForward);
@@ -211,6 +188,17 @@ private:
     void setupBeamTarget();
     void updateBeamTarget(float deltaTime);
     void renderBeamTarget(const glm::mat4& view, const glm::mat4& projection);
+    void setupDeflectorPrism();
+    void renderDeflectorPrism(const glm::mat4& view, const glm::mat4& projection);
+    void rebuildDeflectorPillarTransform();
+    bool raySphereIntersect(
+        const glm::vec3& origin,
+        const glm::vec3& direction,
+        const glm::vec3& sphereCenter,
+        float sphereRadius,
+        float maxDistance,
+        float& outDistance
+    ) const;
 };
 
 #endif

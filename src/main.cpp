@@ -99,12 +99,8 @@ int main(int argc, char* argv[])
     // Spawn under the ceiling with enough headroom.
     camera.Position.y = g_groundHeight + 3.0f;
     std::cout << "Controles:" << std::endl;
-    std::cout << "  I/K -> augmenter/diminuer la reflectivite de la sphere" << std::endl;
-    std::cout << "  O/L -> augmenter/diminuer la refractivite du cube" << std::endl;
     std::cout << "  F   -> tirer un projectile de lumiere" << std::endl;
     std::cout << "  B   -> poser la lumiere au sol / la recuperer" << std::endl;
-    std::cout << "  U/J -> augmenter/diminuer la lumiere du haut" << std::endl;
-    std::cout << "  H/N -> augmenter/diminuer la portee des lumieres de coin" << std::endl;
     std::cout << "  SPACE -> saut (gravite active)" << std::endl;
     std::cout << "  P   -> pause/reprendre (libere/reprend la souris)" << std::endl;
     std::cout << "  C   -> afficher/masquer le curseur de visee" << std::endl;
@@ -136,16 +132,8 @@ int main(int argc, char* argv[])
 }
 
 void processInput(GLFWwindow* window) {
-    static bool keyIPressedLastFrame = false;
-    static bool keyKPressedLastFrame = false;
-    static bool keyOPressedLastFrame = false;
-    static bool keyLPressedLastFrame = false;
     static bool keyFPressedLastFrame = false;
     static bool keyBPressedLastFrame = false;
-    static bool keyUPressedLastFrame = false;
-    static bool keyJPressedLastFrame = false;
-    static bool keyHPressedLastFrame = false;
-    static bool keyNPressedLastFrame = false;
     static bool keySpacePressedLastFrame = false;
     static bool keyPPressedLastFrame = false;
     static bool keyCPressedLastFrame = false;
@@ -162,16 +150,8 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera.ProcessKeyboard(RIGHT, deltaTime);
 
-    bool keyIPressed = (glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS);
-    bool keyKPressed = (glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS);
-    bool keyOPressed = (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS);
-    bool keyLPressed = (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
     bool keyFPressed = (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
     bool keyBPressed = (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS);
-    bool keyUPressed = (glfwGetKey(window, GLFW_KEY_U) == GLFW_PRESS);
-    bool keyJPressed = (glfwGetKey(window, GLFW_KEY_J) == GLFW_PRESS);
-    bool keyHPressed = (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS);
-    bool keyNPressed = (glfwGetKey(window, GLFW_KEY_N) == GLFW_PRESS);
     bool keySpacePressed = (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
     bool keyPPressed = (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS);
     bool keyCPressed = (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
@@ -190,43 +170,11 @@ void processInput(GLFWwindow* window) {
     }
 
     if (g_game != nullptr) {
-        if (keyIPressed && !keyIPressedLastFrame) {
-            g_game->IncreaseSphereReflectivity(0.05f);
-            std::cout << "Sphere reflectivite: " << g_game->GetSphereReflectivity() << std::endl;
-        }
-        if (keyKPressed && !keyKPressedLastFrame) {
-            g_game->DecreaseSphereReflectivity(0.05f);
-            std::cout << "Sphere reflectivite: " << g_game->GetSphereReflectivity() << std::endl;
-        }
-        if (keyOPressed && !keyOPressedLastFrame) {
-            g_game->IncreaseCubeRefractivity(0.05f);
-            std::cout << "Cube refractive index: " << g_game->GetCubeRefractiveIndex() << std::endl;
-        }
-        if (keyLPressed && !keyLPressedLastFrame) {
-            g_game->DecreaseCubeRefractivity(0.05f);
-            std::cout << "Cube refractive index: " << g_game->GetCubeRefractiveIndex() << std::endl;
-        }
         if (keyFPressed && !keyFPressedLastFrame) {
             g_game->FireLightProjectile(camera.Position, camera.Front);
         }
         if (keyBPressed && !keyBPressedLastFrame) {
             g_game->PlaceTemporaryLight(camera.Position, camera.Front);
-        }
-        if (keyUPressed && !keyUPressedLastFrame) {
-            g_game->IncreaseTopLight(0.03f);
-            std::cout << "Top light strength: " << g_game->GetTopLightStrength() << std::endl;
-        }
-        if (keyJPressed && !keyJPressedLastFrame) {
-            g_game->DecreaseTopLight(0.03f);
-            std::cout << "Top light strength: " << g_game->GetTopLightStrength() << std::endl;
-        }
-        if (keyHPressed && !keyHPressedLastFrame) {
-            g_game->IncreaseCornerLightRange(0.1f);
-            std::cout << "Corner light range: " << g_game->GetCornerLightRange() << std::endl;
-        }
-        if (keyNPressed && !keyNPressedLastFrame) {
-            g_game->DecreaseCornerLightRange(0.1f);
-            std::cout << "Corner light range: " << g_game->GetCornerLightRange() << std::endl;
         }
     }
 
@@ -245,16 +193,8 @@ void processInput(GLFWwindow* window) {
         g_jumpHeld = false;
     }
 
-    keyIPressedLastFrame = keyIPressed;
-    keyKPressedLastFrame = keyKPressed;
-    keyOPressedLastFrame = keyOPressed;
-    keyLPressedLastFrame = keyLPressed;
     keyFPressedLastFrame = keyFPressed;
     keyBPressedLastFrame = keyBPressed;
-    keyUPressedLastFrame = keyUPressed;
-    keyJPressedLastFrame = keyJPressed;
-    keyHPressedLastFrame = keyHPressed;
-    keyNPressedLastFrame = keyNPressed;
     keySpacePressedLastFrame = keySpacePressed;
 }
 

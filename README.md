@@ -14,30 +14,28 @@ Template de projet OpenGL pour le cours INFO-H-502.
 
 ```
 mon_projet_opengl/
-├── CMakeLists.txt          # Configuration CMake
+├── CMakeLists.txt          # Configuration CMake (définit GAME_RESOURCE_DIR → resources/)
 ├── README.md               # Documentation
-├── assets/                 # Ressources
-│   ├── models/            # Fichiers .obj
-│   └── textures/           # Images .jpg/.png
-├── include/               # Headers
-│   ├── camera.h           # Classe caméra
-│   ├── shader.h           # Classe shader
-│   └── object.h           # Classe pour charger modèles
-├── src/                   # Code source
-│   ├── main.cpp           # Point d'entrée
-│   ├── Game.cpp           # Logique de jeu
+├── resources/              # Données chargées à l'exécution
+│   ├── glsl/               # Shaders GLSL (.vert, .frag)
+│   ├── models/             # Maillages exportés (.obj, etc.)
+│   └── textures/           # Images (.jpg, .png, …)
+├── assets/                 # Fichiers sources / hors pipeline runtime
+│   └── blender/            # Scènes .blend (exportez vers resources/models/)
+├── include/                # Headers
+│   ├── camera.h
+│   ├── shader.h
+│   └── object.h
+├── src/                    # Code source
+│   ├── main.cpp
+│   ├── Game.cpp
 │   ├── Game.h
-│   ├── Light.cpp          # Système d'éclairage
+│   ├── Light.cpp
 │   └── Light.h
-├── shaders/               # Shaders GLSL
-│   ├── basic.vert
-│   ├── basic.frag
-│   ├── phong.vert
-│   ├── phong.frag
-│   ├── cubemap.vert
-│   └── cubemap.frag
-└── build/                 # Dossier de build (généré)
+└── build/                  # Dossier de build (généré)
 ```
+
+Les chemins vers `resources/` sont résolus via la macro `GAME_RESOURCE_DIR` (chemin absolu défini par CMake) : l'exécutable peut être lancé depuis n'importe quel répertoire courant.
 
 ## Installation
 

@@ -30,10 +30,16 @@ set(SOURCES
 # Exécutable
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+# Racine des ressources runtime (shaders GLSL, modèles, textures) : chemin absolu pour que
+# l'exécutable trouve les fichiers quel que soit le répertoire de travail courant.
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    "GAME_RESOURCE_DIR=\"${CMAKE_SOURCE_DIR}/resources\""
+)
+
 # Liens
 target_link_libraries(${PROJECT_NAME}
     PUBLIC OpenGL::GL
     PUBLIC glfw
 )
 
-# Copie des shaders et assets - REMOVED to use relative paths
+# Les shaders / modèles / textures sont lus depuis ${CMAKE_SOURCE_DIR}/resources (voir GAME_RESOURCE_DIR).
