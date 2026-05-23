@@ -89,6 +89,10 @@ Game::Game() : time(0.0f),
                groundDiffuseTextureLoaded(false),
                pillarDiffuseTexture(0),
                pillarDiffuseTextureLoaded(false),
+               capturePillarMesh(nullptr),
+               capturePillarModelMatrix(glm::mat4(1.0f)),
+               capturePillarMetalTexture(0),
+               capturePillarMetalTextureLoaded(false),
                shadowMapFBO(0),
                shadowMapTextures{0, 0, 0, 0},
                lightSpaceMatrices{
@@ -128,6 +132,17 @@ Game::Game() : time(0.0f),
     Object* cube = new Object(game_internal::resourcePath("models/cube.obj").c_str());
     cube->makeObject(*phongShader);
     objects.push_back(cube);
+
+    capturePillarMesh = new Object(game_internal::resourcePath("models/capture_pillar.obj").c_str());
+    if (!capturePillarMesh->vertices.empty()) {
+        capturePillarMesh->makeObject(*phongShader);
+        std::cout << "Maillage OBJ du pilier recepteur charge (" << capturePillarMesh->vertices.size()
+                  << " sommets).\n";
+    } else {
+        delete capturePillarMesh;
+        capturePillarMesh = nullptr;
+        std::cout << "AVERTISSEMENT: capture_pillar.obj absent ou illisible — cube conserve pour le pilier central.\n";
+    }
 
     // Rectangular pillars arranged as a full scene grid.
     const float pillarSpacing = 3.2f;
@@ -317,6 +332,25 @@ Game::Game() : time(0.0f),
         std::cout << "INFO: aucune image diffuse de piliers trouvee, rendu couleur utilise." << std::endl;
     }
 
+    const std::vector<std::string> captureMetalCandidates = {
+        game_internal::resourcePath("textures/Metal055A_2K-JPG/Metal055A_2K-JPG_Color.jpg"),
+        game_internal::resourcePath("textures/Metal055A_2K-JPG_Color.jpg")
+    };
+    for (const auto& texturePath : captureMetalCandidates) {
+        if (!game_internal::fileExists(texturePath)) {
+            continue;
+        }
+        capturePillarMetalTexture = game_internal::loadTexture2D(texturePath);
+        if (capturePillarMetalTexture != 0) {
+            capturePillarMetalTextureLoaded = true;
+            std::cout << "Texture metal du pilier recepteur chargee: " << texturePath << std::endl;
+            break;
+        }
+    }
+    if (!capturePillarMetalTextureLoaded) {
+        std::cout << "INFO: texture metal Metal055 pour le pilier recepteur introuvable." << std::endl;
+    }
+
     // Shadow maps: one depth texture per "corner" light source (Real-Time Rendering 4e,
     // §7.4 "Shadow Maps", p. 234). The textures are configured for hardware PCF (RTR4 §7.5
     // "Percentage-Closer Filtering", p. 248-249): GL_LINEAR + COMPARE_REF_TO_TEXTURE lets
@@ -381,7 +415,9 @@ Game::Game() : time(0.0f),
 }
 
 Game::~Game() {
-    for (auto obj : objects) delete obj;
+    for (auto obj : objects) {
+        delete obj;
+    }
     for (auto light : lights) delete light;
     delete phongShader;
     delete lampShader;
@@ -390,6 +426,12 @@ Game::~Game() {
     delete shadowDepthShader;
     delete lightMarker;
     delete groundObject;
+    if (capturePillarMesh != nullptr) {
+        delete capturePillarMesh;
+    }
+    if (capturePillarMetalTexture != 0) {
+        glDeleteTextures(1, &capturePillarMetalTexture);
+    }
     glDeleteVertexArrays(1, &skyboxVAO);
     glDeleteBuffers(1, &skyboxVBO);
     glDeleteTextures(1, &cubemapTexture);

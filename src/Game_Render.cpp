@@ -73,9 +73,15 @@ void Game::renderShadowMap() {
             glEnable(GL_CULL_FACE);
             glCullFace(GL_FRONT);
 
-            for (const auto& cubeModel : extraCubeModels) {
+            for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
+                const glm::mat4& cubeModel = extraCubeModels[ci];
                 shadowDepthShader->setMat4("model", cubeModel);
-                objects[0]->draw();
+                if (static_cast<int>(ci) == centerPillarColliderIndex && capturePillarMesh != nullptr) {
+                    shadowDepthShader->setMat4("model", capturePillarModelMatrix);
+                    capturePillarMesh->draw();
+                } else {
+                    objects[0]->draw();
+                }
             }
 
             shadowDepthShader->setMat4("model", groundObject->model);
@@ -166,9 +172,15 @@ void Game::renderShadowMap() {
         // Only shadow-casters are rendered here: the ground is a pure receiver and is
         // intentionally omitted to save work (RTR4 §7.4 p. 234 — "only objects that can
         // cast shadows need to be rendered" into the light's view).
-        for (const auto& cubeModel : extraCubeModels) {
+        for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
+            const glm::mat4& cubeModel = extraCubeModels[ci];
             shadowDepthShader->setMat4("model", cubeModel);
-            objects[0]->draw();
+            if (static_cast<int>(ci) == centerPillarColliderIndex && capturePillarMesh != nullptr) {
+                shadowDepthShader->setMat4("model", capturePillarModelMatrix);
+                capturePillarMesh->draw();
+            } else {
+                objects[0]->draw();
+            }
         }
     } else {
         dynamicLightSpaceMatrix = glm::mat4(1.0f);
@@ -373,7 +385,51 @@ void Game::renderSceneOpaque(
             phongShader->setFloat("light.specular", 0.0f);
         }
         phongShader->setVec3("viewPos", cameraPosition);
-        for (const auto& cubeModel : extraCubeModels) {
+        auto drawCapturePillar = [&]() -> bool {
+            if (capturePillarMesh == nullptr) {
+                return false;
+            }
+            phongShader->setMat4("model", capturePillarModelMatrix);
+            if (capturePillarMetalTextureLoaded) {
+                glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.8f, 1.8f);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, capturePillarMetalTexture);
+                phongShader->setInt("useTexture", 1);
+                phongShader->setVec3("material.specular", glm::vec3(0.72f, 0.74f, 0.78f));
+                phongShader->setFloat("material.shininess", 112.0f);
+            } else if (pillarDiffuseTextureLoaded) {
+                const float sx = std::abs(capturePillarModelMatrix[0][0]);
+                const float sy = std::abs(capturePillarModelMatrix[1][1]);
+                const float sz = std::abs(capturePillarModelMatrix[2][2]);
+                phongShader->setInt("useTexture", 1);
+                if (sy < 1.0f) {
+                    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 12.0f, 12.0f);
+                } else if (sx > 10.0f || sz > 10.0f) {
+                    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 12.0f, 4.0f);
+                } else {
+                    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.75f, 5.5f);
+                }
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, pillarDiffuseTexture);
+            } else {
+                phongShader->setInt("useTexture", 0);
+            }
+            capturePillarMesh->draw();
+            phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
+            phongShader->setFloat("material.shininess", 18.0f);
+            if (capturePillarMetalTextureLoaded || pillarDiffuseTextureLoaded) {
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            phongShader->setInt("useTexture", 0);
+            glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.0f, 1.0f);
+            return true;
+        };
+
+        for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
+            const glm::mat4& cubeModel = extraCubeModels[ci];
+            if (static_cast<int>(ci) == centerPillarColliderIndex && drawCapturePillar()) {
+                continue;
+            }
             if (pillarDiffuseTextureLoaded) {
                 const float sx = std::abs(cubeModel[0][0]);
                 const float sy = std::abs(cubeModel[1][1]);

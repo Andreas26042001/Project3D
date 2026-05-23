@@ -470,6 +470,30 @@ void Game::rebuildCenterPillarTransform() {
     const float baseZ = centerPillarOffsetZ;
     centerPillarBaseCenter = glm::vec3(0.0f, groundTopY, baseZ);
 
+    // Boite englobante du mesh capture_pillar.obj (Blender export) — ancrage au sol,
+    // mise a l'echelle sur la meme empreinte que l'ancien cube (collision inchangee).
+    const float meshXMin = -1.1012f;
+    const float meshXMax = 1.1012f;
+    const float meshYMin = -1.0f;
+    const float meshYMax = 3.693571f;
+    const float meshZMin = -1.1012f;
+    const float meshZMax = 1.1012f;
+    const glm::vec3 meshBottomCenter(
+        (meshXMin + meshXMax) * 0.5f,
+        meshYMin,
+        (meshZMin + meshZMax) * 0.5f
+    );
+    const float meshSpanX = meshXMax - meshXMin;
+    const float meshSpanY = meshYMax - meshYMin;
+    const float meshSpanZ = meshZMax - meshZMin;
+    const float scaleX = (centerPillarHalfWidth * 2.0f) / meshSpanX;
+    const float scaleY = centerPillarHeight / meshSpanY;
+    const float scaleZ = (centerPillarHalfWidth * 2.0f) / meshSpanZ;
+    capturePillarModelMatrix =
+        glm::translate(glm::mat4(1.0f), glm::vec3(centerPillarBaseCenter.x, groundTopY, centerPillarBaseCenter.z))
+        * glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ))
+        * glm::translate(glm::mat4(1.0f), -meshBottomCenter);
+
     if (centerPillarColliderIndex >= 0 &&
         centerPillarColliderIndex < static_cast<int>(extraCubeModels.size())) {
         const float centerY = groundTopY + centerPillarHeight * 0.5f;

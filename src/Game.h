@@ -100,6 +100,10 @@ private:
     Shader* shadowDepthShader;
     Object* lightMarker;
     Object* groundObject;
+    Object* capturePillarMesh;
+    glm::mat4 capturePillarModelMatrix;
+    GLuint capturePillarMetalTexture;
+    bool capturePillarMetalTextureLoaded;
     GLuint skyboxVAO;
     GLuint skyboxVBO;
     GLuint cubemapTexture;
