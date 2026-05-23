@@ -1,48 +1,74 @@
-cmake_minimum_required(VERSION 3.20)
-project(MonProjetOpenGL VERSION 1.0)
+#Template for INFOH502
+#Heavily inspired from https://github.com/Polytonic/Glitter/blob/master/CMakeLists.txt
 
+#project setup
+project(MonProjetOpenGL)
+
+#set the minimal version of cmake and the minimal version of the c++ language
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_VERBOSE_MAKEFILE ON)
 
-# Dépendances
+# Set output directories for binaries and libraries
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+
+
 find_package(OpenGL REQUIRED)
 
-# GLFW
+#for glad library
+add_library( glad STATIC import/glad/src/glad.c)
+set(GLAD_INCLUDE "import/glad/include")
+target_include_directories(glad PUBLIC ${GLAD_INCLUDE})
+
+#for GLFW
+option(GLFW_BUILD_DOCS OFF)
+option(GLFW_BUILD_EXAMPLES OFF)
+option(GLFW_BUILD_TESTS OFF)
+
+#Search for glfw in case it is installed
 find_package(glfw3 QUIET)
-if(NOT glfw3_FOUND)
-    add_subdirectory(3rdParty/glfw)
+if (NOT glfw3_FOUND)
+    #if glfw is not found, we will use the sources from the submodules
+    add_subdirectory(import/glfw)
+    include_directories(import/glfw/include/)
 endif()
 
-# GLM et STB (si pas déjà inclus)
-include_directories(include)
-include_directories(3rdParty/glm)
-include_directories(3rdParty/stb)
-include_directories(3rdParty/glad/include)
 
-# Sources
-set(SOURCES
-    src/main.cpp
+include_directories(import/glad/include/
+                    import/glm/
+                    import/stb/)
+
+
+add_compile_definitions(PATH_TO_OBJECTS="${CMAKE_CURRENT_SOURCE_DIR}/assets/objects")
+add_compile_definitions(PATH_TO_TEXTURE="${CMAKE_CURRENT_SOURCE_DIR}/assets/textures")
+add_compile_definitions(PATH_TO_SHADER="${CMAKE_CURRENT_SOURCE_DIR}/shader")
+add_compile_definitions(PATH_TO_CUBESMAPS="${CMAKE_CURRENT_SOURCE_DIR}/assets/cubesmaps")
+
+
+set(SOURCES_COMMON
     src/Game.cpp
     src/Game_Render.cpp
     src/Game_Physics.cpp
     src/GameInternal.cpp
     src/Light.cpp
-    3rdParty/glad/src/glad.c
 )
 
-# Exécutable
-add_executable(${PROJECT_NAME} ${SOURCES})
-
-# Racine des ressources runtime (shaders GLSL, modèles, textures) : chemin absolu pour que
-# l'exécutable trouve les fichiers quel que soit le répertoire de travail courant.
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-    "GAME_RESOURCE_DIR=\"${CMAKE_SOURCE_DIR}/resources\""
+set(SOURCES_main
+    main.cpp
+    ${SOURCES_COMMON}
 )
 
-# Liens
-target_link_libraries(${PROJECT_NAME}
-    PUBLIC OpenGL::GL
-    PUBLIC glfw
-)
 
-# Les shaders / modèles / textures sont lus depuis ${CMAKE_SOURCE_DIR}/resources (voir GAME_RESOURCE_DIR).
+if (NOT glfw3_FOUND)
+    add_executable(${PROJECT_NAME} ${SOURCES_main})
+    target_include_directories(${PROJECT_NAME} PUBLIC ${GLAD_INCLUDE} import/glfw/include/ src)
+    target_link_libraries(${PROJECT_NAME} PUBLIC OpenGL::GL glfw glad)
+
+else()
+    add_executable(${PROJECT_NAME} ${SOURCES_main})
+    target_include_directories(${PROJECT_NAME} PUBLIC ${GLAD_INCLUDE} src)
+    target_link_libraries(${PROJECT_NAME} PUBLIC OpenGL::GL glfw glad)
+
+endif()

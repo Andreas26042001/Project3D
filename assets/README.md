@@ -1,23 +1,30 @@
-# Dossier `assets/`
+# Assets
 
-Ce répertoire regroupe les **fichiers sources** qui ne sont pas nécessaires au lancement du jeu tel quel (scènes Blender, maquettes, etc.).
+Données chargées à l'exécution, calquées sur la structure de [DylanMichel0304/GLSL](https://github.com/DylanMichel0304/GLSL).
 
-## Contenu prévu
+```
+assets/
+├── objects/     # Modèles .obj / .mtl
+├── textures/    # Images diffuses
+├── cubesmaps/   # Faces de skybox
+└── blender/     # Sources Blender (non chargées directement)
+```
 
-- **`blender/`** : fichiers `.blend` et sauvegardes d’édition. Exportez les maillages (par ex. en `.obj`) vers `resources/models/` pour les charger dans le code.
+## Workflow Blender
 
-## Ressources runtime
+1. Modéliser dans `assets/blender/`.
+2. Exporter le maillage (`.obj`) dans `assets/objects/`.
+3. Charger dans le code avec `game_internal::objectPath("mon_modele.obj")`.
 
-Les fichiers réellement chargés par l’application se trouvent sous **`resources/`** à la racine du projet :
+## Chemins CMake
 
-- `resources/glsl/` — shaders
-- `resources/models/` — `.obj` exportés
-- `resources/textures/` — images
+Le `CMakeLists.txt` injecte les macros suivantes :
 
-Le chemin de base est injecté à la compilation (`GAME_RESOURCE_DIR` dans `CMakeLists.txt`). Dans le code C++, utilisez la fonction `resourcePath("…")` définie dans `Game.cpp` pour composer un chemin sous `resources/`.
+| Macro | Dossier |
+|-------|---------|
+| `PATH_TO_OBJECTS` | `assets/objects/` |
+| `PATH_TO_TEXTURE` | `assets/textures/` |
+| `PATH_TO_CUBESMAPS` | `assets/cubesmaps/` |
+| `PATH_TO_SHADER` | `shader/` |
 
-## Exemple
-
-1. Modéliser dans `assets/blender/ma_scene.blend`.
-2. Exporter `ma_scene.obj` dans `resources/models/`.
-3. Charger avec `new Object(resourcePath("models/ma_scene.obj").c_str())`.
+Les shaders GLSL sont dans le dossier **`shader/`** à la racine du projet (pas sous `assets/`).

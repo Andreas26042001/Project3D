@@ -18,7 +18,6 @@ public:
     void Render(Camera& camera);
     void SetViewportSize(int width, int height);
     void FireLightProjectile(const glm::vec3& origin, const glm::vec3& direction);
-    void PlaceTemporaryLight(const glm::vec3& cameraPosition, const glm::vec3& cameraForward);
     float GetGroundHeight() const;
     float GetSupportHeightAtPosition(const glm::vec3& cameraPosition, float cameraRadius) const;
     void ResolveCameraCollisions(glm::vec3& cameraPosition, float cameraRadius) const;
@@ -114,16 +113,14 @@ private:
     GLuint pillarDiffuseTexture;
     bool pillarDiffuseTextureLoaded;
     GLuint shadowMapFBO;
-    std::array<GLuint, 4> shadowMapTextures;
-    std::array<glm::mat4, 4> lightSpaceMatrices;
-    // The four corner torches and their occluders (pillars, walls, ceiling) are static,
-    // so their depth maps only need to be computed once at startup and reused every frame
-    // — Real-Time Rendering 4e §7.4 p. 235: "this texture can be reused. Most shadow
-    // techniques can benefit from reusing intermediate computed results from frame to
-    // frame if no change has occurred."
+    GLuint shadowMapTexture;
+    glm::mat4 lightSpaceMatrix;
+    // La lumiere du plafond et ses occluders (piliers, murs, plafond) sont statiques :
+    // la shadow map n'est calculee qu'une fois au demarrage (RTR4 §7.4 p. 235).
     bool staticShadowMapsBuilt;
     GLuint dynamicShadowMapTexture;
     glm::mat4 dynamicLightSpaceMatrix;
+    glm::vec3 ceilingLightPosition;
     int viewportWidth;
     int viewportHeight;
 
@@ -136,23 +133,17 @@ private:
     float lightProjectileSpeed;
     float lightProjectileMaxLifetime;
     float lightProjectileMaxDistance;
-    bool placedLightActive;
-    float placedLightTimer;
-    float placedLightDuration;
-    glm::vec3 placedLightVelocity;
-    float placedLightGravity;
-    float placedLightRadius;
-    bool lightLockedOnPillar;
-    bool lightLockAnimating;
-    float lightLockAnimT;
-    float lightLockAnimDuration;
-    glm::vec3 lightLockSourcePos;
-    glm::vec3 lightLockTargetPos;
+    bool lightAnchoredOnPillar;
+    bool lightAnchorAnimating;
+    float lightAnchorAnimT;
+    float lightAnchorAnimDuration;
+    glm::vec3 lightAnchorSourcePos;
+    glm::vec3 lightAnchorTargetPos;
     float worldCollisionHalfExtent;
     float groundTopY;
-    float topLightStrength;
-    float cornerLightRange;
-    glm::vec3 topLightColor;
+    float ceilingLightStrength;
+    float ceilingLightRange;
+    glm::vec3 ceilingLightColor;
     bool reflectionClipEnabled;
     glm::vec4 reflectionClipPlane;
     bool edgeClipEnabled;
@@ -185,15 +176,17 @@ private:
         glm::vec3& outHit,
         float& outDistance
     ) const;
-    void disablePlacedLight();
-    void resolvePlacedLightCollisions(glm::vec3& position, glm::vec3& velocity);
     void syncCarriedLight(const glm::vec3& cameraPosition, const glm::vec3& cameraForward);
     void rebuildCenterPillarTransform();
     void setupBeamTarget();
     void updateBeamTarget(float deltaTime);
     void renderBeamTarget(const glm::mat4& view, const glm::mat4& projection);
     void setupDeflectorPrism();
-    void renderDeflectorPrism(const glm::mat4& view, const glm::mat4& projection);
+    void renderDeflectorPrism(
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const glm::vec3& cameraPosition
+    );
     void rebuildDeflectorPillarTransform();
     bool raySphereIntersect(
         const glm::vec3& origin,

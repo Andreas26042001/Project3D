@@ -35,96 +35,41 @@ void Game::renderShadowMap() {
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.5f, 4.0f);
 
-    const glm::vec3 topCornerLights[4] = {
-        glm::vec3(-12.5f, groundTopY + 3.6f, -12.5f),
-        glm::vec3( 12.5f, groundTopY + 3.6f, -12.5f),
-        glm::vec3(-12.5f, groundTopY + 3.6f,  12.5f),
-        glm::vec3( 12.5f, groundTopY + 3.6f,  12.5f)
-    };
-
-    // The four corner torches and their occluders (pillars, walls, ceiling) never move,
-    // so the depth maps are built once at startup and reused for the rest of the run.
-    // This is the frame-to-frame coherence optimization described in RTR4 §7.4 p. 235
-    // ("If the shadow situation does not change from frame to frame, i.e., the light and
-    // shadow casters do not move relative to each other, this texture can be reused").
+    // La lumiere du plafond et ses occluders (piliers, plafond) ne bougent pas :
+    // la shadow map n'est calculee qu'une fois au demarrage (RTR4 §7.4 p. 235).
     if (!staticShadowMapsBuilt) {
-        for (int i = 0; i < 4; ++i) {
-            // Light frustum tightened to the actual receiver volume of the cave (~25x25x5).
-            // RTR4 §7.4 Figure 7.11 (p. 236) shows that pulling near/far in and reducing
-            // the x/y extent around the visible receivers increases the effective
-            // shadow-map resolution and the z-buffer precision (cf. §4.7.2 cited at p. 236).
-            // Previous frustum was a loose 48x48x60 cube wasting ~4x of the texel budget.
-            const glm::vec3 shadowTarget(0.0f, groundTopY + 1.2f, 0.0f);
-            const glm::mat4 lightProjection = glm::ortho(-18.0f, 18.0f, -18.0f, 18.0f, 0.5f, 45.0f);
-            const glm::mat4 lightView = glm::lookAt(topCornerLights[i], shadowTarget, glm::vec3(0.0f, 1.0f, 0.0f));
-            lightSpaceMatrices[i] = lightProjection * lightView;
+        const glm::vec3 shadowTarget(0.0f, groundTopY + 1.2f, 0.0f);
+        const glm::mat4 lightProjection = glm::ortho(-18.0f, 18.0f, -18.0f, 18.0f, 0.5f, 45.0f);
+        const glm::mat4 lightView = glm::lookAt(ceilingLightPosition, shadowTarget, glm::vec3(0.0f, 1.0f, 0.0f));
+        lightSpaceMatrix = lightProjection * lightView;
 
-            shadowDepthShader->use();
-            shadowDepthShader->setMat4("lightSpaceMatrix", lightSpaceMatrices[i]);
-            glViewport(0, 0, game_internal::kShadowMapSize, game_internal::kShadowMapSize);
-            glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowMapTextures[i], 0);
-            glClear(GL_DEPTH_BUFFER_BIT);
-            // Second-depth shadow mapping (Wang [1845], RTR4 §7.4 p. 238 and Figure 7.14):
-            // by culling front faces and writing the back faces' depth into the shadow map,
-            // self-shadow acne on lit surfaces is essentially eliminated at the cost of a
-            // small risk of light leaks near silhouette edges. This works well for the closed
-            // pillar cubes in this scene (they are "watertight" — see RTR4 §7.4 p. 238).
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_FRONT);
+        shadowDepthShader->use();
+        shadowDepthShader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        glViewport(0, 0, game_internal::kShadowMapSize, game_internal::kShadowMapSize);
+        glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowMapTexture, 0);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
 
-            for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
-                const glm::mat4& cubeModel = extraCubeModels[ci];
-                shadowDepthShader->setMat4("model", cubeModel);
-                if (static_cast<int>(ci) == centerPillarColliderIndex && capturePillarMesh != nullptr) {
-                    shadowDepthShader->setMat4("model", capturePillarModelMatrix);
-                    capturePillarMesh->draw();
-                } else {
-                    objects[0]->draw();
-                }
+        for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
+            const glm::mat4& cubeModel = extraCubeModels[ci];
+            shadowDepthShader->setMat4("model", cubeModel);
+            if (static_cast<int>(ci) == centerPillarColliderIndex && capturePillarMesh != nullptr) {
+                shadowDepthShader->setMat4("model", capturePillarModelMatrix);
+                capturePillarMesh->draw();
+            } else {
+                objects[0]->draw();
             }
-
-            shadowDepthShader->setMat4("model", groundObject->model);
-            groundObject->draw();
         }
+
+        shadowDepthShader->setMat4("model", groundObject->model);
+        groundObject->draw();
         staticShadowMapsBuilt = true;
     }
 
-    if (!lights.empty()) {
-        // Player-carried torch: re-rendered every frame, modeled as a spotlight with a
-        // perspective frustum (RTR4 §7.4 p. 234, "if the local light is a spotlight, it
-        // has a natural frustum associated with it").
-        //
-        // === Stable shadow maps (RTR4 §7.4 end of section, p. 239) ===
-        //
-        // As the carried torch moves with the camera, the projection samples a slightly
-        // different set of world-space directions each frame. Texels no longer cover the
-        // same world footprints and shadow edges visibly "swim" pixel by pixel between
-        // frames. RTR4 §7.4 p. 239 prescribes "[forcing] each succeeding shadow map
-        // generated to maintain the same relative texel beam locations in world space"
-        // [Valient 1810, Tuft 1792]. The canonical recipe is written for directional
-        // / orthographic lights (typically the sun in a CSM); we adapt it here to a
-        // perspective spotlight via two cooperating measures:
-        //
-        //   (a) Snap the light position to a fine world-space grid (1 mm). Removes
-        //       sub-millimeter floating-point jitter of the spotlight origin and forces
-        //       identical views on still frames, which is otherwise impossible when the
-        //       camera position varies by a few ULPs every frame.
-        //
-        //   (b) Project a fixed world-space anchor (here the cone-axis target ~8 m in
-        //       front of the torch) into clip space, compute its fractional sub-texel
-        //       offset on the shadow map (kShadowMapSize) grid, and apply that delta as a constant
-        //       NDC translation by left-multiplying the projection by a translation
-        //       matrix. Because the translation row multiplies the clip-space w, the
-        //       offset survives the perspective divide as a uniform shift across the
-        //       entire frustum — so the snap is exact for every fragment, not just for
-        //       the anchor itself.
-        //
-        // Limitation explicitly inherited from §7.4: a perspective spotlight does not
-        // have a constant world-space texel grid (the texel "beams" diverge from the
-        // light origin), so a rotation of the spotlight inevitably re-shuffles which
-        // world surfaces sit in which texel. The snap therefore stabilizes translation
-        // and sub-pixel jitter, but cannot eliminate rotation-induced reshuffling.
+    if (!lights.empty() && (lightProjectileActive || lightAnchoredOnPillar)) {
+        // Shadow map for the projectile or pillar-anchored light.
         const glm::vec3 rawEye = lights[0]->position;
         glm::vec3 forward = lightProjectileDirection;
         if (glm::length(forward) < 0.0001f) {
@@ -213,6 +158,11 @@ void Game::Render(Camera& camera) {
     glm::mat4 view = camera.GetViewMatrix();
     renderSceneOpaque(view, projection, camera.Position, playerWorldPosition);
     renderSkybox(view, projection);
+    // LAB03 ex09/ex10 : l'objet cubemap se dessine avant le skybox, OU après si
+    // translucide — ici après pour que le skybox (depth=1) ne recouvre pas le prisme.
+    if (game_internal::kEnableChapter14Translucency) {
+        renderDeflectorPrism(view, projection, camera.Position);
+    }
     renderCrosshair();
 }
 
@@ -227,15 +177,13 @@ void Game::renderSceneOpaque(
     const glm::vec3& cameraPosition,
     const glm::vec3& playerWorldPosition
 ) {
-    // Rayons bleus: on calcule jusqu'a deux segments. Le rayon principal sort du canon
-    // sur +X; s'il traverse la pyramide deflectrice, il est stoppe au point d'entree
-    // et un second rayon part du centre de la pyramide sur la direction perpendiculaire.
-    // Tout est calcule ici une fois pour etre reutilise par les passes phong (eclairage)
-    // et le rendu des cubes lumineux.
+    const bool dynamicLightActive = !lights.empty() && (lightProjectileActive || lightAnchoredOnPillar);
+    const glm::vec3 dynamicLightColor(0.30f, 0.60f, 1.00f);
+    const float dynamicLightStrength = 1.6f;
     const glm::vec3 beamColor(0.30f, 0.60f, 1.00f);
     const float kBeamStrength = 1.8f;
     const float kMaxBeamDistance = 40.0f;
-    const bool beamActive = !lights.empty() && lightLockedOnPillar && !lightLockAnimating;
+    const bool beamActive = !lights.empty() && lightAnchoredOnPillar && !lightAnchorAnimating;
 
     int beamCount = 0;
     glm::vec3 beamStarts[2] = {cannonMuzzlePos, cannonMuzzlePos};
@@ -245,7 +193,7 @@ void Game::renderSceneOpaque(
     if (beamActive) {
         glm::vec3 hit(0.0f);
         float dist = 0.0f;
-        const bool hitSomething = raycastScene(
+        const bool hitSomething = game_internal::kEnableChapter22Collision && raycastScene(
             cannonMuzzlePos, cannonDirection, kMaxBeamDistance,
             cannonColliderIndex, hit, dist
         );
@@ -254,24 +202,21 @@ void Game::renderSceneOpaque(
             hit = cannonMuzzlePos + cannonDirection * kMaxBeamDistance;
         }
 
-        // Intersection rayon principal <-> sphere englobante de la pyramide.
         float prismHitDist = 0.0f;
-        const bool prismHit = raySphereIntersect(
+        const bool prismHit = game_internal::kEnableChapter14Translucency && raySphereIntersect(
             cannonMuzzlePos, cannonDirection, prismCenter,
             prismRadius, dist, prismHitDist
         );
 
         if (prismHit) {
-            // Rayon principal coupe au point d'entree dans la pyramide.
             beamStarts[0] = cannonMuzzlePos;
-            beamEnds[0]   = cannonMuzzlePos + cannonDirection * prismHitDist;
+            beamEnds[0] = cannonMuzzlePos + cannonDirection * prismHitDist;
             beamLengths[0] = prismHitDist;
             beamCount = 1;
 
-            // Rayon devie depuis le centre de la pyramide jusqu'au premier obstacle.
             glm::vec3 dHit(0.0f);
             float dDist = 0.0f;
-            const bool dGotHit = raycastScene(
+            const bool dGotHit = game_internal::kEnableChapter22Collision && raycastScene(
                 prismCenter, prismDeflectDirection, kMaxBeamDistance,
                 cannonColliderIndex, dHit, dDist
             );
@@ -280,88 +225,31 @@ void Game::renderSceneOpaque(
                 dHit = prismCenter + prismDeflectDirection * kMaxBeamDistance;
             }
             beamStarts[1] = prismCenter;
-            beamEnds[1]   = dHit;
+            beamEnds[1] = dHit;
             beamLengths[1] = dDist;
             beamCount = 2;
         } else {
             beamStarts[0] = cannonMuzzlePos;
-            beamEnds[0]   = hit;
+            beamEnds[0] = hit;
             beamLengths[0] = dist;
             beamCount = 1;
         }
     }
 
-    const float topLightY = groundTopY + 3.6f;
-    const glm::vec3 cornerWarmBase(1.0f, 0.82f, 0.30f);
-    const glm::vec3 cornerWarmTip(1.0f, 0.92f, 0.45f);
-    const float cornerFlickerA[4] = {
-        std::sin(time * 2.1f + 0.2f) * 0.5f + 0.5f,
-        std::sin(time * 2.9f + 1.4f) * 0.5f + 0.5f,
-        std::sin(time * 1.7f + 2.5f) * 0.5f + 0.5f,
-        std::sin(time * 3.2f + 3.8f) * 0.5f + 0.5f
-    };
-    const float cornerFlickerB[4] = {
-        std::sin(time * 5.7f + 0.8f) * 0.5f + 0.5f,
-        std::sin(time * 4.6f + 2.1f) * 0.5f + 0.5f,
-        std::sin(time * 6.1f + 1.3f) * 0.5f + 0.5f,
-        std::sin(time * 4.9f + 2.9f) * 0.5f + 0.5f
-    };
-    float cornerFlicker[4];
-    for (int i = 0; i < 4; ++i) {
-        // Random-like but deterministic and desynchronized flicker per corner.
-        cornerFlicker[i] = 0.78f + 0.22f * (0.58f * cornerFlickerA[i] + 0.42f * cornerFlickerB[i]);
-    }
-    const float cornerFlickerMean = (cornerFlicker[0] + cornerFlicker[1] + cornerFlicker[2] + cornerFlicker[3]) * 0.25f;
-    const glm::vec3 cornerLightColor = glm::mix(cornerWarmBase, cornerWarmTip, 0.3f + 0.5f * cornerFlickerMean);
-    const float cornerLightStrength = topLightStrength * 2.2f;
-    const float placedCornerLikeFlicker = 0.88f + 0.12f * (std::sin(time * 6.2f + 1.3f) * 0.5f + 0.5f);
-    const glm::vec3 topCornerLights[4] = {
-        glm::vec3(-12.5f, topLightY, -12.5f),
-        glm::vec3( 12.5f, topLightY, -12.5f),
-        glm::vec3(-12.5f, topLightY,  12.5f),
-        glm::vec3( 12.5f, topLightY,  12.5f)
-    };
-
-    if (!objects.empty()) {
-        phongShader->use();
-        phongShader->setMat4("view", view);
-        phongShader->setMat4("projection", projection);
-        for (int i = 0; i < 4; ++i) {
-            phongShader->setMat4("lightSpaceMatrices[" + std::to_string(i) + "]", lightSpaceMatrices[i]);
+    auto applyPhongLightingUniforms = [&](bool groundPass) {
+        phongShader->setVec3("ceilingLightPos", ceilingLightPosition);
+        phongShader->setVec3("ceilingLightColor", ceilingLightColor);
+        phongShader->setFloat("ceilingLightStrength", ceilingLightStrength);
+        const float rangeFactor = std::max(0.2f, ceilingLightRange);
+        phongShader->setFloat("ceilingAttLinear", 0.11f / rangeFactor);
+        phongShader->setFloat("ceilingAttQuadratic", 0.15f / (rangeFactor * rangeFactor));
+        phongShader->setInt("dynamicLightActive", dynamicLightActive ? 1 : 0);
+        if (dynamicLightActive) {
+            phongShader->setVec3("dynamicLightPos", lights[0]->position);
         }
-        phongShader->setMat4("dynamicLightSpaceMatrix", dynamicLightSpaceMatrix);
-        phongShader->setInt("useClipPlane", reflectionClipEnabled ? 1 : 0);
-        phongShader->setVec4("clipPlane", reflectionClipPlane);
-        phongShader->setInt("useShadowMap", 1);
-        for (int i = 0; i < 4; ++i) {
-            phongShader->setInt("shadowMaps[" + std::to_string(i) + "]", 1 + i);
-            glActiveTexture(GL_TEXTURE1 + i);
-            glBindTexture(GL_TEXTURE_2D, shadowMapTextures[i]);
-        }
-        phongShader->setInt("dynamicShadowMap", 5);
-        phongShader->setInt("dynamicShadowActive", !lights.empty() ? 1 : 0);
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
-        glActiveTexture(GL_TEXTURE0);
-        phongShader->setInt("useEdgeClipPlanes", edgeClipEnabled ? 1 : 0);
-        for (int i = 0; i < 4; ++i) {
-            phongShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
-        }
-        for (int i = 0; i < 4; ++i) {
-            phongShader->setVec3("topCornerLights[" + std::to_string(i) + "]", topCornerLights[i]);
-            phongShader->setFloat("topCornerFlicker[" + std::to_string(i) + "]", cornerFlicker[i]);
-        }
-        phongShader->setVec3("topLightColor", cornerLightColor);
-        phongShader->setFloat("topLightStrength", cornerLightStrength);
-        const float rangeFactor = std::max(0.2f, cornerLightRange);
-        phongShader->setFloat("cornerAttLinear", 0.11f / rangeFactor);
-        phongShader->setFloat("cornerAttQuadratic", 0.15f / (rangeFactor * rangeFactor));
-        const bool dynamicCornerLikeActive = !lights.empty();
-        phongShader->setInt("placedCornerLikeActive", dynamicCornerLikeActive ? 1 : 0);
-        phongShader->setVec3("placedCornerLikePos", lights[0]->position);
-        phongShader->setVec3("placedCornerLikeColor", lights[0]->color);
-        phongShader->setFloat("placedCornerLikeStrength", dynamicCornerLikeActive ? 1.6f : 0.0f);
-        phongShader->setFloat("placedCornerLikeFlicker", placedCornerLikeFlicker);
+        phongShader->setVec3("dynamicLightColor", dynamicLightColor);
+        phongShader->setFloat("dynamicLightStrength", dynamicLightActive ? dynamicLightStrength : 0.0f);
+        phongShader->setInt("dynamicShadowActive", dynamicLightActive ? 1 : 0);
         phongShader->setInt("beamLightCount", beamCount);
         for (int i = 0; i < beamCount; ++i) {
             phongShader->setVec3("beamLightStarts[" + std::to_string(i) + "]", beamStarts[i]);
@@ -369,21 +257,43 @@ void Game::renderSceneOpaque(
             phongShader->setVec3("beamLightColors[" + std::to_string(i) + "]", beamColor);
             phongShader->setFloat("beamLightStrengths[" + std::to_string(i) + "]", kBeamStrength);
         }
+        phongShader->setInt("isGroundPass", groundPass ? 1 : 0);
+        lights[0]->setUniforms(*phongShader);
+        phongShader->setFloat("light.ambient", 0.0f);
+        phongShader->setFloat("light.diffuse", 0.0f);
+        phongShader->setFloat("light.specular", 0.0f);
+    };
+
+    if (!objects.empty()) {
+        phongShader->use();
+        phongShader->setMat4("view", view);
+        phongShader->setMat4("projection", projection);
+        phongShader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        phongShader->setMat4("dynamicLightSpaceMatrix", dynamicLightSpaceMatrix);
+        phongShader->setInt("useClipPlane", reflectionClipEnabled ? 1 : 0);
+        phongShader->setVec4("clipPlane", reflectionClipPlane);
+        phongShader->setInt("useShadowMap", 1);
+        phongShader->setInt("shadowMap", 1);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
+        phongShader->setInt("dynamicShadowMap", 5);
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
+        glActiveTexture(GL_TEXTURE0);
+        phongShader->setInt("useEdgeClipPlanes", edgeClipEnabled ? 1 : 0);
+        for (int i = 0; i < 4; ++i) {
+            phongShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
+        }
+        applyPhongLightingUniforms(false);
         phongShader->setInt("useTexture", 0);
         phongShader->setInt("diffuseMap", 0);
-        phongShader->setInt("isGroundPass", 0);
         phongShader->setInt("pillarShadowCount", 0);
+        phongShader->setInt("useEnvironmentReflection", 0);
         glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.0f, 1.0f);
         phongShader->setVec3("material.ambient", glm::vec3(0.10f, 0.10f, 0.10f));
         phongShader->setVec3("material.diffuse", glm::vec3(1.0f, 1.0f, 1.0f));
         phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
         phongShader->setFloat("material.shininess", 18.0f);
-        lights[0]->setUniforms(*phongShader);
-        if (dynamicCornerLikeActive) {
-            phongShader->setFloat("light.ambient", 0.0f);
-            phongShader->setFloat("light.diffuse", 0.0f);
-            phongShader->setFloat("light.specular", 0.0f);
-        }
         phongShader->setVec3("viewPos", cameraPosition);
         auto drawCapturePillar = [&]() -> bool {
             if (capturePillarMesh == nullptr) {
@@ -414,7 +324,15 @@ void Game::renderSceneOpaque(
             } else {
                 phongShader->setInt("useTexture", 0);
             }
+            glActiveTexture(GL_TEXTURE6);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+            phongShader->setInt("environmentMap", 6);
+            phongShader->setInt("useEnvironmentReflection", 1);
+            phongShader->setFloat("reflectionStrength", 0.55f);
             capturePillarMesh->draw();
+            phongShader->setInt("useEnvironmentReflection", 0);
+            glActiveTexture(GL_TEXTURE6);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
             phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
             phongShader->setFloat("material.shininess", 18.0f);
             if (capturePillarMetalTextureLoaded || pillarDiffuseTextureLoaded) {
@@ -462,20 +380,15 @@ void Game::renderSceneOpaque(
     phongShader->setMat4("model", groundObject->model);
     phongShader->setMat4("view", view);
     phongShader->setMat4("projection", projection);
-    for (int i = 0; i < 4; ++i) {
-        phongShader->setMat4("lightSpaceMatrices[" + std::to_string(i) + "]", lightSpaceMatrices[i]);
-    }
+    phongShader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
     phongShader->setMat4("dynamicLightSpaceMatrix", dynamicLightSpaceMatrix);
     phongShader->setInt("useClipPlane", reflectionClipEnabled ? 1 : 0);
     phongShader->setVec4("clipPlane", reflectionClipPlane);
     phongShader->setInt("useShadowMap", 1);
-    for (int i = 0; i < 4; ++i) {
-        phongShader->setInt("shadowMaps[" + std::to_string(i) + "]", 1 + i);
-        glActiveTexture(GL_TEXTURE1 + i);
-        glBindTexture(GL_TEXTURE_2D, shadowMapTextures[i]);
-    }
+    phongShader->setInt("shadowMap", 1);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
     phongShader->setInt("dynamicShadowMap", 5);
-    phongShader->setInt("dynamicShadowActive", !lights.empty() ? 1 : 0);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
     glActiveTexture(GL_TEXTURE0);
@@ -483,31 +396,9 @@ void Game::renderSceneOpaque(
     for (int i = 0; i < 4; ++i) {
         phongShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
     }
-    for (int i = 0; i < 4; ++i) {
-        phongShader->setVec3("topCornerLights[" + std::to_string(i) + "]", topCornerLights[i]);
-        phongShader->setFloat("topCornerFlicker[" + std::to_string(i) + "]", cornerFlicker[i]);
-    }
-    phongShader->setVec3("topLightColor", cornerLightColor);
-    phongShader->setFloat("topLightStrength", cornerLightStrength);
-    const float rangeFactor = std::max(0.2f, cornerLightRange);
-    phongShader->setFloat("cornerAttLinear", 0.11f / rangeFactor);
-    phongShader->setFloat("cornerAttQuadratic", 0.15f / (rangeFactor * rangeFactor));
-    const bool dynamicCornerLikeActive = !lights.empty();
-    phongShader->setInt("placedCornerLikeActive", dynamicCornerLikeActive ? 1 : 0);
-    phongShader->setVec3("placedCornerLikePos", lights[0]->position);
-    phongShader->setVec3("placedCornerLikeColor", lights[0]->color);
-    phongShader->setFloat("placedCornerLikeStrength", dynamicCornerLikeActive ? 1.6f : 0.0f);
-    phongShader->setFloat("placedCornerLikeFlicker", placedCornerLikeFlicker);
-    phongShader->setInt("beamLightCount", beamCount);
-    for (int i = 0; i < beamCount; ++i) {
-        phongShader->setVec3("beamLightStarts[" + std::to_string(i) + "]", beamStarts[i]);
-        phongShader->setVec3("beamLightEnds[" + std::to_string(i) + "]", beamEnds[i]);
-        phongShader->setVec3("beamLightColors[" + std::to_string(i) + "]", beamColor);
-        phongShader->setFloat("beamLightStrengths[" + std::to_string(i) + "]", kBeamStrength);
-    }
+    applyPhongLightingUniforms(true);
     phongShader->setInt("useTexture", groundDiffuseTextureLoaded ? 1 : 0);
     phongShader->setInt("diffuseMap", 0);
-    phongShader->setInt("isGroundPass", 1);
     const int maxShadowPillars = 64;
     const int shadowPillarCount = std::min(static_cast<int>(pillarBaseCenters.size()), maxShadowPillars);
     phongShader->setInt("pillarShadowCount", shadowPillarCount);
@@ -529,12 +420,6 @@ void Game::renderSceneOpaque(
     phongShader->setVec3("material.diffuse", glm::vec3(0.19f, 0.19f, 0.19f));
     phongShader->setVec3("material.specular", glm::vec3(0.11f, 0.11f, 0.11f));
     phongShader->setFloat("material.shininess", 9.0f);
-    lights[0]->setUniforms(*phongShader);
-    if (dynamicCornerLikeActive) {
-        phongShader->setFloat("light.ambient", 0.0f);
-        phongShader->setFloat("light.diffuse", 0.0f);
-        phongShader->setFloat("light.specular", 0.0f);
-    }
     phongShader->setVec3("viewPos", cameraPosition);
     groundObject->draw();
     if (groundDiffuseTextureLoaded) {
@@ -551,7 +436,7 @@ void Game::renderSceneOpaque(
         for (int i = 0; i < 4; ++i) {
             lampShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
         }
-        lampShader->setVec3("lightColor", lights[0]->color);
+        lampShader->setVec3("lightColor", dynamicLightColor);
 
         glm::mat4 lightModel = glm::mat4(1.0f);
         lightModel = glm::translate(lightModel, lights[0]->position);
@@ -560,11 +445,10 @@ void Game::renderSceneOpaque(
         lightMarker->draw();
     }
 
-    // Rail au sol qui guide le pilier central. Plus lumineux quand la lampe est ancree.
+    // Rail au sol qui guide le pilier central.
     {
         const glm::vec3 railIdle(0.10f, 0.18f, 0.32f);
         const glm::vec3 railActive(0.30f, 0.60f, 1.00f);
-        const bool beamActive = lightLockedOnPillar && !lightLockAnimating;
         const glm::vec3 railColor = beamActive ? railActive : railIdle;
         lampShader->use();
         lampShader->setMat4("view", view);
@@ -588,7 +472,6 @@ void Game::renderSceneOpaque(
     // qu'il la masque visuellement.
     renderBeamTarget(view, projection);
 
-    // Cubes fins lumineux materialisant le rayon principal et son rayon devie.
     if (beamCount > 0) {
         const float kBeamHalfWidth = 0.035f;
         lampShader->use();
@@ -608,9 +491,6 @@ void Game::renderSceneOpaque(
             }
             const glm::vec3 beamCenter = (beamStarts[i] + beamEnds[i]) * 0.5f;
             const glm::vec3 dir = beamEnds[i] - beamStarts[i];
-            // Les deux rayons utilises sont alignes sur un axe canonique (X pour le
-            // rayon principal, Z pour le rayon devie). On peut donc construire la
-            // matrice avec un simple scale composant par composant.
             const float lenX = std::abs(dir.x) > 0.0001f ? std::abs(dir.x) : kBeamHalfWidth * 2.0f;
             const float lenY = std::abs(dir.y) > 0.0001f ? std::abs(dir.y) : kBeamHalfWidth * 2.0f;
             const float lenZ = std::abs(dir.z) > 0.0001f ? std::abs(dir.z) : kBeamHalfWidth * 2.0f;
@@ -622,7 +502,7 @@ void Game::renderSceneOpaque(
         }
     }
 
-    // Visual markers for the four fixed ceiling lights.
+    // Marqueur de la lumiere jaune au plafond.
     lampShader->use();
     lampShader->setMat4("view", view);
     lampShader->setMat4("projection", projection);
@@ -632,18 +512,12 @@ void Game::renderSceneOpaque(
     for (int i = 0; i < 4; ++i) {
         lampShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
     }
-    lampShader->setInt("useEdgeClipPlanes", edgeClipEnabled ? 1 : 0);
-    for (int i = 0; i < 4; ++i) {
-        lampShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
-    }
-    for (int i = 0; i < 4; ++i) {
-        lampShader->setVec3("lightColor", cornerLightColor * (0.95f + 0.35f * cornerFlicker[i]));
-        glm::mat4 topLightModel = glm::mat4(1.0f);
-        topLightModel = glm::translate(topLightModel, topCornerLights[i]);
-        topLightModel = glm::scale(topLightModel, glm::vec3(0.14f));
-        lampShader->setMat4("model", topLightModel);
-        lightMarker->draw();
-    }
+    lampShader->setVec3("lightColor", ceilingLightColor);
+    glm::mat4 ceilingLightModel = glm::mat4(1.0f);
+    ceilingLightModel = glm::translate(ceilingLightModel, ceilingLightPosition);
+    ceilingLightModel = glm::scale(ceilingLightModel, glm::vec3(0.16f));
+    lampShader->setMat4("model", ceilingLightModel);
+    lightMarker->draw();
 
     // Character proxy: a small yellow cube following the camera from behind.
     lampShader->use();
@@ -663,10 +537,6 @@ void Game::renderSceneOpaque(
     lightMarker->draw();
 
     renderExplosionParticles(view, projection);
-
-    // Pyramide bleue translucide rendue en dernier (apres tout l'opaque + les rayons),
-    // pour que le blending alpha la combine proprement avec le reste de la scene.
-    renderDeflectorPrism(view, projection);
 }
 
 void Game::setupCrosshair() {
@@ -715,20 +585,15 @@ void Game::ToggleCrosshair() {
 void Game::setupBeamTarget() {
     const float kCannonY = groundTopY + centerPillarHeight - cannonHalfWidth;
     const float kAvoidZFightingOffset = 0.012f;
+    const float kTargetWallThickness = 0.6f;
 
-    // Cible 1: sur la face interieure du mur Est (normale -X), atteignable par le
-    // rayon principal en glissant le pilier central sur son rail Z.
-    const float kWallInnerX = worldCollisionHalfExtent - 0.3f;  // mapHalfExtent - wallThickness/2
+    // Face interieure des petits pans de mur (centre a mapHalfExtent - epaisseur/2).
+    const float kWallInnerX = worldCollisionHalfExtent - kTargetWallThickness;
     const float kTarget1Z = 0.8f;
     targetPosition = glm::vec3(kWallInnerX - kAvoidZFightingOffset, kCannonY, kTarget1Z);
     target1ModelMatrix = glm::translate(glm::mat4(1.0f), targetPosition);
 
-    // Cible 2: sur la face interieure du mur Sud (normale -Z), atteignable par le
-    // rayon devie en glissant le pilier deflecteur sur son rail X. On vise un x dans
-    // le couloir vide entre les rangees de piliers gx=1 (x in [2.85, 3.55]) et gx=2
-    // (x in [6.05, 6.75]). deflectorPillarBase.x - 1.0 = 4.5 est central dans ce
-    // couloir et accessible (offset = -1.0 in [-1.8, 1.8]).
-    const float kWallInnerZ = worldCollisionHalfExtent - 0.3f;
+    const float kWallInnerZ = worldCollisionHalfExtent - kTargetWallThickness;
     const float kTarget2X = deflectorPillarBase.x - 1.0f;
     target2Position = glm::vec3(kTarget2X, kCannonY, kWallInnerZ - kAvoidZFightingOffset);
     target2ModelMatrix = glm::translate(glm::mat4(1.0f), target2Position);
@@ -788,47 +653,33 @@ void Game::setupBeamTarget() {
 }
 
 void Game::updateBeamTarget(float deltaTime) {
-    const bool beamCurrentlyActive = !lights.empty() && lightLockedOnPillar && !lightLockAnimating;
+    const bool beamCurrentlyActive = !lights.empty() && lightAnchoredOnPillar && !lightAnchorAnimating;
     bool target1Hit = false;
     bool target2Hit = false;
 
     if (beamCurrentlyActive) {
-        // Rayon principal (canon vers +X).
+        const float kMax = 60.0f;
+        float beamLen = kMax;
+
         glm::vec3 hit(0.0f);
         float dist = 0.0f;
-        const float kMax = 60.0f;
-        const bool hitSomething = raycastScene(
+        const bool hitSomething = game_internal::kEnableChapter22Collision && raycastScene(
             cannonMuzzlePos, cannonDirection, kMax,
             cannonColliderIndex, hit, dist
         );
         const float beamLenFull = hitSomething ? dist : kMax;
 
-        // Si la pyramide intercepte, le rayon principal s'arrete au point d'entree;
-        // un rayon devie part alors du centre de la pyramide.
         float prismDist = 0.0f;
-        const bool prismIntercept = raySphereIntersect(
+        const bool prismIntercept = game_internal::kEnableChapter14Translucency && raySphereIntersect(
             cannonMuzzlePos, cannonDirection, prismCenter,
             prismRadius, beamLenFull, prismDist
         );
-        const float beamLen = prismIntercept ? prismDist : beamLenFull;
+        beamLen = prismIntercept ? prismDist : beamLenFull;
 
-        // Cible 1 sur le rayon principal.
-        {
-            const glm::vec3 toTarget = targetPosition - cannonMuzzlePos;
-            const float t = glm::dot(toTarget, cannonDirection);
-            if (t >= 0.0f && t <= beamLen + 0.05f) {
-                const glm::vec3 closest = cannonMuzzlePos + cannonDirection * t;
-                if (glm::length(targetPosition - closest) < targetHitTolerance) {
-                    target1Hit = true;
-                }
-            }
-        }
-
-        // Cible 2 sur le rayon devie (si la pyramide intercepte).
-        if (prismIntercept) {
+        if (prismIntercept && game_internal::kEnableChapter14Translucency) {
             glm::vec3 dHit(0.0f);
             float dDist = 0.0f;
-            const bool dGotHit = raycastScene(
+            const bool dGotHit = game_internal::kEnableChapter22Collision && raycastScene(
                 prismCenter, prismDeflectDirection, kMax,
                 cannonColliderIndex, dHit, dDist
             );
@@ -841,6 +692,15 @@ void Game::updateBeamTarget(float deltaTime) {
                 if (glm::length(target2Position - closest) < targetHitTolerance) {
                     target2Hit = true;
                 }
+            }
+        }
+
+        const glm::vec3 toTarget = targetPosition - cannonMuzzlePos;
+        const float t = glm::dot(toTarget, cannonDirection);
+        if (t >= 0.0f && t <= beamLen + 0.05f) {
+            const glm::vec3 closest = cannonMuzzlePos + cannonDirection * t;
+            if (glm::length(targetPosition - closest) < targetHitTolerance) {
+                target1Hit = true;
             }
         }
     }
@@ -868,8 +728,11 @@ void Game::renderBeamTarget(const glm::mat4& view, const glm::mat4& projection) 
         return;
     }
 
-    const glm::vec3 colorIdle(0.0f, 0.0f, 0.0f);
+    const glm::vec3 colorIdle(0.08f, 0.14f, 0.22f);
     const glm::vec3 colorActive(0.30f, 0.60f, 1.00f);
+
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-1.0f, -1.0f);
 
     lampShader->use();
     lampShader->setMat4("view", view);
@@ -893,26 +756,50 @@ void Game::renderBeamTarget(const glm::mat4& view, const glm::mat4& projection) 
     glDrawArrays(GL_TRIANGLES, 0, targetVertexCount);
 
     glBindVertexArray(0);
+    glDisable(GL_POLYGON_OFFSET_FILL);
 }
 
 void Game::setupDeflectorPrism() {
-    // Shader minimal avec une couleur RGBA uniforme pour rendre la pyramide en blending.
+    // Exo 9 + 10 LAB03 : reflexion (reflect) et refraction (refract) sur la cubemap.
     const std::string vert = R"(
         #version 330 core
         layout (location = 0) in vec3 aPos;
+        layout (location = 1) in vec3 aNormal;
+        out vec3 v_frag_coord;
+        out vec3 v_normal;
         uniform mat4 model;
         uniform mat4 view;
         uniform mat4 projection;
         void main() {
-            gl_Position = projection * view * model * vec4(aPos, 1.0);
+            vec4 frag_coord = model * vec4(aPos, 1.0);
+            gl_Position = projection * view * frag_coord;
+            v_normal = mat3(transpose(inverse(model))) * aNormal;
+            v_frag_coord = frag_coord.xyz;
         }
     )";
     const std::string frag = R"(
         #version 330 core
         out vec4 FragColor;
-        uniform vec4 color;
+        in vec3 v_frag_coord;
+        in vec3 v_normal;
+        uniform vec3 u_view_pos;
+        uniform samplerCube cubemapSampler;
+        uniform float refractionIndice;
         void main() {
-            FragColor = color;
+            vec3 N = normalize(v_normal);
+            vec3 V = normalize(u_view_pos - v_frag_coord);
+            vec3 R = reflect(-V, N);
+            vec3 reflColor = texture(cubemapSampler, R).rgb;
+            float ratio = 1.0 / refractionIndice;
+            vec3 T = refract(-V, N, ratio);
+            vec3 refrColor = length(T) > 0.001 ? texture(cubemapSampler, T).rgb : reflColor;
+            float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+            vec3 env = mix(refrColor, reflColor, fresnel);
+            // Leger assombrissement + teinte pour distinguer le cristal du ciel derriere.
+            env *= 0.88;
+            env = mix(env, vec3(0.30, 0.60, 1.00), 0.22);
+            float alpha = 0.88 + 0.12 * fresnel;
+            FragColor = vec4(env, alpha);
         }
     )";
     prismShader = new Shader(vert, frag);
@@ -933,16 +820,23 @@ void Game::setupDeflectorPrism() {
     };
 
     std::vector<float> data;
-    data.reserve(8 * 3 * 3);
+    data.reserve(8 * 3 * 6);
     for (int f = 0; f < 8; ++f) {
+        const glm::vec3 p0 = v[faces[f][0]];
+        const glm::vec3 p1 = v[faces[f][1]];
+        const glm::vec3 p2 = v[faces[f][2]];
+        const glm::vec3 faceNormal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
         for (int k = 0; k < 3; ++k) {
-            const glm::vec3& vert = v[faces[f][k]];
-            data.push_back(vert.x);
-            data.push_back(vert.y);
-            data.push_back(vert.z);
+            const glm::vec3& position = v[faces[f][k]];
+            data.push_back(position.x);
+            data.push_back(position.y);
+            data.push_back(position.z);
+            data.push_back(faceNormal.x);
+            data.push_back(faceNormal.y);
+            data.push_back(faceNormal.z);
         }
     }
-    prismVertexCount = static_cast<int>(data.size() / 3);
+    prismVertexCount = static_cast<int>(data.size() / 6);
 
     glGenVertexArrays(1, &prismVAO);
     glGenBuffers(1, &prismVBO);
@@ -950,11 +844,17 @@ void Game::setupDeflectorPrism() {
     glBindBuffer(GL_ARRAY_BUFFER, prismVBO);
     glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(float), data.data(), GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
     glBindVertexArray(0);
 }
 
-void Game::renderDeflectorPrism(const glm::mat4& view, const glm::mat4& projection) {
+void Game::renderDeflectorPrism(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const glm::vec3& cameraPosition
+) {
     if (prismVAO == 0 || prismShader == nullptr || prismVertexCount <= 0) {
         return;
     }
@@ -966,19 +866,25 @@ void Game::renderDeflectorPrism(const glm::mat4& view, const glm::mat4& projecti
     prismShader->setMat4("view", view);
     prismShader->setMat4("projection", projection);
     prismShader->setMat4("model", model);
-    glUniform4f(glGetUniformLocation(prismShader->ID, "color"), 0.30f, 0.60f, 1.0f, 0.5f);
+    prismShader->setVec3("u_view_pos", cameraPosition);
+    prismShader->setFloat("refractionIndice", 1.52f);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+    prismShader->setInt("cubemapSampler", 6);
 
-    // Rendu en blending classique (alpha-blend). On ne reecrit pas le depth pour que
-    // les fragments derriere la pyramide restent visibles a travers elle.
+    // Comme LAB03 ex10 : depth test actif + ecriture profondeur (pas de depth mask off).
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
 
     glBindVertexArray(prismVAO);
     glDrawArrays(GL_TRIANGLES, 0, prismVertexCount);
     glBindVertexArray(0);
 
-    glDepthMask(GL_TRUE);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     glDisable(GL_BLEND);
 }
 void Game::setupSkybox() {
@@ -1034,40 +940,17 @@ void Game::setupSkybox() {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 
-    glGenTextures(1, &cubemapTexture);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
-
-    const unsigned char faceColors[6][3] = {
-        {  12,  18,  30 }, // +X
-        {  10,  16,  26 }, // -X
-        {  16,  22,  34 }, // +Y
-        {   4,   4,   7 }, // -Y
-        {  11,  17,  28 }, // +Z
-        {   9,  14,  24 }  // -Z
-    };
-
-    for (unsigned int i = 0; i < 6; ++i) {
-        glTexImage2D(
-            GL_TEXTURE_CUBE_MAP_POSITIVE_X + i,
-            0,
-            GL_RGB,
-            1,
-            1,
-            0,
-            GL_RGB,
-            GL_UNSIGNED_BYTE,
-            faceColors[i]
-        );
+    cubemapTexture = game_internal::loadVoidSpaceCubemap();
+    if (cubemapTexture == 0) {
+        std::cout << "ERREUR: impossible de charger la cubemap void space.\n";
     }
-
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 }
 
 void Game::renderSkybox(const glm::mat4& view, const glm::mat4& projection) {
+    if (cubemapTexture == 0) {
+        return;
+    }
+
     glDepthFunc(GL_LEQUAL);
 
     cubemapShader->use();

@@ -1,4 +1,5 @@
 #include "Game.h"
+#include "GameInternal.h"
 #include "shader.h"
 #include "object.h"
 #include "Light.h"
@@ -9,7 +10,9 @@
 void Game::Update(float deltaTime) {
     time += deltaTime;
     updateExplosionParticles(deltaTime);
-    rebuildSceneColliders();
+    if (game_internal::kEnableChapter22Collision) {
+        rebuildSceneColliders();
+    }
     updateBeamTarget(deltaTime);
 
     if (!lights.empty() && lightProjectileActive) {
@@ -33,66 +36,40 @@ void Game::Update(float deltaTime) {
         }
 
         const float projectileRadius = 0.06f;
-        if (isSegmentCollidingWithScene(currentPosition, nextPosition, projectileRadius)) {
+        if (game_internal::kEnableChapter22Collision &&
+            isSegmentCollidingWithScene(currentPosition, nextPosition, projectileRadius)) {
             disableLightProjectile();
             return;
         }
 
-        // Capture: si le projectile passe a proximite du sommet du pilier central,
-        // le pilier l'aspire et l'ancre au-dessus, comme un appui sur B en visant.
         const glm::vec3 pillarTop = centerPillarBaseCenter + glm::vec3(0.0f, centerPillarHeight, 0.0f);
         const float kCaptureRadius = 1.0f;
         if (glm::length(nextPosition - pillarTop) < kCaptureRadius) {
             lightProjectileActive = false;
             lightProjectileLifetime = 0.0f;
-            placedLightActive = false;
-            placedLightTimer = 0.0f;
-            placedLightVelocity = glm::vec3(0.0f);
-
-            lightLockedOnPillar = true;
-            lightLockAnimating = true;
-            lightLockAnimT = 0.0f;
-            lightLockSourcePos = nextPosition;
-            lightLockTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
+            lightAnchoredOnPillar = true;
+            lightAnchorAnimating = true;
+            lightAnchorAnimT = 0.0f;
+            lightAnchorSourcePos = nextPosition;
+            lightAnchorTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
             lights[0]->position = nextPosition;
+            lightProjectileDirection = cannonDirection;
             return;
         }
 
         lights[0]->position = nextPosition;
-    } else if (!lights.empty() && placedLightActive) {
-        placedLightVelocity.y += placedLightGravity * deltaTime;
-        glm::vec3 nextPosition = lights[0]->position + placedLightVelocity * deltaTime;
-        resolvePlacedLightCollisions(nextPosition, placedLightVelocity);
-
-        if (nextPosition.x < -worldCollisionHalfExtent || nextPosition.x > worldCollisionHalfExtent ||
-            nextPosition.y < -worldCollisionHalfExtent || nextPosition.y > worldCollisionHalfExtent ||
-            nextPosition.z < -worldCollisionHalfExtent || nextPosition.z > worldCollisionHalfExtent) {
-            disablePlacedLight();
-            return;
-        }
-
-        lights[0]->position = nextPosition;
-    } else if (!lights.empty() && lightLockedOnPillar) {
-        if (lightLockAnimating) {
-            lightLockAnimT += deltaTime / std::max(0.0001f, lightLockAnimDuration);
-            if (lightLockAnimT >= 1.0f) {
-                lightLockAnimT = 1.0f;
-                lightLockAnimating = false;
+    } else if (!lights.empty() && lightAnchoredOnPillar) {
+        if (lightAnchorAnimating) {
+            lightAnchorAnimT += deltaTime / std::max(0.0001f, lightAnchorAnimDuration);
+            if (lightAnchorAnimT >= 1.0f) {
+                lightAnchorAnimT = 1.0f;
+                lightAnchorAnimating = false;
             }
-            // smoothstep pour donner un effet d'aspiration progressif.
-            const float t = lightLockAnimT * lightLockAnimT * (3.0f - 2.0f * lightLockAnimT);
-            lights[0]->position = glm::mix(lightLockSourcePos, lightLockTargetPos, t);
+            const float t = lightAnchorAnimT * lightAnchorAnimT * (3.0f - 2.0f * lightAnchorAnimT);
+            lights[0]->position = glm::mix(lightAnchorSourcePos, lightAnchorTargetPos, t);
         } else {
-            lights[0]->position = lightLockTargetPos;
+            lights[0]->position = lightAnchorTargetPos;
         }
-    }
-
-    if (!lights.empty()) {
-        // Balance the dynamic light to reduce floor-vs-pillar contrast.
-        lights[0]->color = glm::vec3(0.30f, 0.60f, 1.00f);
-        lights[0]->ambientStrength = 0.02f;
-        lights[0]->diffuseStrength = 0.78f;
-        lights[0]->specularStrength = 0.38f;
     }
 }
 bool Game::raySphereIntersect(
@@ -138,6 +115,10 @@ float Game::GetGroundHeight() const {
 }
 
 float Game::GetSupportHeightAtPosition(const glm::vec3& cameraPosition, float cameraRadius) const {
+    if (!game_internal::kEnableChapter22Collision) {
+        return groundTopY;
+    }
+
     float highestSupport = groundTopY;
     const float maxSupportY = cameraPosition.y - 0.05f;
 
@@ -174,6 +155,10 @@ float Game::GetSupportHeightAtPosition(const glm::vec3& cameraPosition, float ca
 }
 
 void Game::ResolveCameraCollisions(glm::vec3& cameraPosition, float cameraRadius) const {
+    if (!game_internal::kEnableChapter22Collision) {
+        return;
+    }
+
     for (const auto& collider : sceneColliders) {
         if (!collider.collisionEnabled) {
             continue;
@@ -218,7 +203,7 @@ void Game::ResolveCameraCollisions(glm::vec3& cameraPosition, float cameraRadius
 }
 
 void Game::FireLightProjectile(const glm::vec3& origin, const glm::vec3& direction) {
-    if (lights.empty() || lightProjectileActive || placedLightActive || lightLockedOnPillar) {
+    if (lights.empty() || lightProjectileActive || lightAnchoredOnPillar) {
         return;
     }
     lightProjectileActive = true;
@@ -226,83 +211,6 @@ void Game::FireLightProjectile(const glm::vec3& origin, const glm::vec3& directi
     lightProjectileStart = origin + direction * 0.35f;
     lightProjectileDirection = glm::normalize(direction);
     lights[0]->position = lightProjectileStart;
-    lights[0]->color = glm::vec3(0.30f, 0.60f, 1.00f);
-    lights[0]->ambientStrength = 0.02f;
-    lights[0]->diffuseStrength = 0.78f;
-    lights[0]->specularStrength = 0.38f;
-}
-
-void Game::PlaceTemporaryLight(const glm::vec3& cameraPosition, const glm::vec3& cameraForward) {
-    if (lights.empty()) {
-        return;
-    }
-    if (lightProjectileActive) {
-        return;
-    }
-
-    // Si la lampe est deja ancree sur le pilier, on la relache (retour en main).
-    if (lightLockedOnPillar) {
-        lightLockedOnPillar = false;
-        lightLockAnimating = false;
-        lightLockAnimT = 0.0f;
-        return;
-    }
-
-    // Detection: proche du pilier central ET on le regarde -> aspirer la lampe.
-    const glm::vec3 pillarTop = centerPillarBaseCenter + glm::vec3(0.0f, centerPillarHeight, 0.0f);
-    const float dx = cameraPosition.x - centerPillarBaseCenter.x;
-    const float dz = cameraPosition.z - centerPillarBaseCenter.z;
-    const float horizontalDist = std::sqrt(dx * dx + dz * dz);
-    const float kMaxInteractDistance = 2.5f;
-    const float kMinAimDot = 0.78f;
-
-    if (horizontalDist < kMaxInteractDistance) {
-        glm::vec3 toPillarTop = pillarTop - cameraPosition;
-        const float lenToTop = glm::length(toPillarTop);
-        if (lenToTop > 0.0001f) {
-            const glm::vec3 dirToPillar = toPillarTop / lenToTop;
-            glm::vec3 forward = cameraForward;
-            if (glm::length(forward) > 0.0001f) {
-                forward = glm::normalize(forward);
-                if (glm::dot(forward, dirToPillar) > kMinAimDot) {
-                    placedLightActive = false;
-                    placedLightTimer = 0.0f;
-                    placedLightVelocity = glm::vec3(0.0f);
-
-                    lightLockedOnPillar = true;
-                    lightLockAnimating = true;
-                    lightLockAnimT = 0.0f;
-                    lightLockSourcePos = lights[0]->position;
-                    lightLockTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
-                    lights[0]->color = glm::vec3(0.30f, 0.60f, 1.00f);
-                    lights[0]->ambientStrength = 0.02f;
-                    lights[0]->diffuseStrength = 0.78f;
-                    lights[0]->specularStrength = 0.38f;
-                    return;
-                }
-            }
-        }
-    }
-
-    // Comportement par defaut: poser la lampe au sol / la recuperer.
-    if (placedLightActive) {
-        disablePlacedLight();
-        return;
-    }
-
-    placedLightActive = true;
-    placedLightTimer = 0.0f;
-    placedLightVelocity = glm::vec3(0.0f);
-    glm::vec3 forwardFlat(cameraForward.x, 0.0f, cameraForward.z);
-    if (glm::length(forwardFlat) > 0.0001f) {
-        forwardFlat = glm::normalize(forwardFlat);
-    } else {
-        forwardFlat = glm::vec3(0.0f, 0.0f, -1.0f);
-    }
-    const glm::vec3 spawnForward = forwardFlat;
-    glm::vec3 placedPosition = cameraPosition + spawnForward * 0.9f;
-    placedPosition.y = groundTopY + placedLightRadius;
-    lights[0]->position = placedPosition;
     lights[0]->color = glm::vec3(0.30f, 0.60f, 1.00f);
     lights[0]->ambientStrength = 0.02f;
     lights[0]->diffuseStrength = 0.78f;
@@ -320,17 +228,8 @@ void Game::disableLightProjectile() {
     lightProjectileLifetime = 0.0f;
 }
 
-void Game::disablePlacedLight() {
-    if (lights.empty()) {
-        return;
-    }
-    placedLightActive = false;
-    placedLightTimer = 0.0f;
-    placedLightVelocity = glm::vec3(0.0f);
-}
-
 void Game::syncCarriedLight(const glm::vec3& cameraPosition, const glm::vec3& cameraForward) {
-    if (lights.empty() || lightProjectileActive || placedLightActive || lightLockedOnPillar) {
+    if (lights.empty() || lightProjectileActive || lightAnchoredOnPillar) {
         return;
     }
 
@@ -346,51 +245,6 @@ void Game::syncCarriedLight(const glm::vec3& cameraPosition, const glm::vec3& ca
     // Carried light: slightly in front and on the right of the camera.
     lights[0]->position = cameraPosition + forward * 0.65f + right * 0.25f - glm::vec3(0.0f, 0.15f, 0.0f);
     lightProjectileDirection = forward;
-}
-
-void Game::resolvePlacedLightCollisions(glm::vec3& position, glm::vec3& velocity) {
-    for (const auto& collider : sceneColliders) {
-        if (!collider.collisionEnabled) {
-            continue;
-        }
-
-        if (collider.type == SceneCollider::Type::AABB) {
-            glm::vec3 minB = collider.center - collider.halfExtents;
-            glm::vec3 maxB = collider.center + collider.halfExtents;
-            glm::vec3 closest = glm::clamp(position, minB, maxB);
-            glm::vec3 delta = position - closest;
-            float dist = glm::length(delta);
-
-            if (dist < placedLightRadius) {
-                glm::vec3 normal(0.0f, 1.0f, 0.0f);
-                if (dist > 0.0001f) {
-                    normal = delta / dist;
-                }
-                float penetration = placedLightRadius - dist;
-                position += normal * penetration;
-
-                if (normal.y > 0.4f && velocity.y < 0.0f) velocity.y = 0.0f;
-                if (std::abs(normal.x) > 0.4f) velocity.x = 0.0f;
-                if (std::abs(normal.z) > 0.4f) velocity.z = 0.0f;
-            }
-        } else {
-            float target = collider.radius + placedLightRadius;
-            glm::vec3 delta = position - collider.center;
-            float dist = glm::length(delta);
-            if (dist < target) {
-                glm::vec3 normal(1.0f, 0.0f, 0.0f);
-                if (dist > 0.0001f) {
-                    normal = delta / dist;
-                }
-                position = collider.center + normal * target;
-
-                float vn = glm::dot(velocity, normal);
-                if (vn < 0.0f) {
-                    velocity -= normal * vn;
-                }
-            }
-        }
-    }
 }
 
 void Game::spawnLightExplosion(const glm::vec3& position) {
@@ -529,9 +383,9 @@ void Game::rebuildCenterPillarTransform() {
         pillarBaseCenters[centerPillarShadowIndex] = centerPillarBaseCenter;
     }
 
-    if (lightLockedOnPillar) {
+    if (lightAnchoredOnPillar) {
         const glm::vec3 pillarTop = centerPillarBaseCenter + glm::vec3(0.0f, centerPillarHeight, 0.0f);
-        lightLockTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
+        lightAnchorTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
     }
 
     // Force la regeneration des shadow maps statiques: les occluders ont bouge.
@@ -567,6 +421,10 @@ void Game::rebuildDeflectorPillarTransform() {
 }
 
 void Game::UpdateMovablePillar(const glm::vec3& cameraPosition, float cameraRadius) {
+    if (!game_internal::kEnableChapter22Collision) {
+        return;
+    }
+
     // Hauteur de l'oeil au-dessus des pieds. Doit rester aligne sur CAMERA_EYE_HEIGHT
     // dans main.cpp. On teste l'intersection verticale [pieds, tete] avec l'AABB du
     // pilier au lieu du seul point oeil: sans ca, pour un pilier plus petit que
@@ -654,6 +512,10 @@ void Game::UpdateMovablePillar(const glm::vec3& cameraPosition, float cameraRadi
 }
 
 void Game::rebuildSceneColliders() {
+    if (!game_internal::kEnableChapter22Collision) {
+        return;
+    }
+
     sceneColliders.clear();
 
     for (const auto& cubeModel : extraCubeModels) {

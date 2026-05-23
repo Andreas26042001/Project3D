@@ -1,28 +1,32 @@
-# Build directories
+# Build artifacts
 build/
+bin/
 cmake-build-*/
 out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
 
-# IDE files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+project_template.code-workspace
 
-# OS files
-.DS_Store
-Thumbs.db
+# OS / éditeur
+**/.DS_Store
+**/Thumbs.db
+*Zone.Identifier
 
-# Executables
+# Binaires
 *.exe
 *.out
 MonProjetOpenGL
 
-# Temporary files
+# Temporaires
 *.tmp
 *.log
-
-# Dependencies (if not using submodules)
-3rdParty/
-!3rdParty/README.mdOneDrive_1_13-05-2026/
 *.pdf
