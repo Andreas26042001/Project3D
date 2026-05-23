@@ -1,8 +1,8 @@
-# Dépendances tierces (`import/`)
+# Third-party dependencies (`import/`)
 
-Ce projet utilise le dossier `import/` (comme [DylanMichel0304/GLSL](https://github.com/DylanMichel0304/GLSL)) pour GLFW, GLAD, GLM et STB.
+This project uses the `import/` folder (like [DylanMichel0304/GLSL](https://github.com/DylanMichel0304/GLSL)) for GLFW, GLAD, GLM, and STB.
 
-## Structure attendue
+## Expected layout
 
 ```
 import/
@@ -20,21 +20,21 @@ import/
 ├── glm/
 │   └── glm/
 │       ├── glm.hpp
-│       └── ... (tous les headers GLM)
+│       └── ... (all GLM headers)
 └── stb/
     ├── stb_image.h
     └── stb_image_write.h
 ```
 
-## Comment obtenir les dépendances
+## How to obtain dependencies
 
-### Option 1 : copier depuis le cours INFO-H-502
+### Option 1: copy from the INFO-H-502 course materials
 
 ```bash
-cp -R /chemin/vers/info-h502_202526/3rdParty import
+cp -R /path/to/info-h502_202526/3rdParty import
 ```
 
-### Option 2 : téléchargement manuel
+### Option 2: manual download
 
 1. **GLAD** — https://glad.dav1d.de/ (OpenGL 4.0 Core) → `import/glad/`
 2. **GLFW** — https://www.glfw.org/download.html (sources) → `import/glfw/`
@@ -43,6 +43,6 @@ cp -R /chemin/vers/info-h502_202526/3rdParty import
 
 ## Notes
 
-- GLFW peut nécessiter des dépendances système (X11 sur Linux, etc.)
-- Sur macOS, GLFW utilise Cocoa
-- Sur Windows, GLFW utilise Win32
+- GLFW may require system libraries (X11 on Linux, etc.)
+- On macOS, GLFW uses Cocoa
+- On Windows, GLFW uses Win32

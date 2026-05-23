@@ -2,12 +2,15 @@
 #define GAME_H
 
 #include <vector>
-#include <array>
-#include <string>
 #include <glad/glad.h>
-#include "camera.h"
 #include "object.h"
-#include "Light.h"
+#include "Collider.h"
+#include "Skybox.h"
+#include "ParticleSystem.h"
+#include "ShadowMap.h"
+#include "Texture.h"
+
+class Player;
 
 class Game {
 public:
@@ -17,7 +20,7 @@ public:
     ~Game();
 
     void Update(float deltaTime);
-    void Render(Camera& camera);
+    void Render(const Player& player);
     void SetViewportSize(int width, int height);
     void FireLightProjectile(const glm::vec3& origin, const glm::vec3& direction);
     float GetGroundHeight() const;
@@ -27,129 +30,112 @@ public:
     void ToggleCrosshair();
 
 private:
-    struct ExplosionParticle {
-        glm::vec3 position;
-        glm::vec3 velocity;
-        glm::vec3 color;
-        float life;
-        float maxLife;
-        float size;
-    };
-    struct SceneCollider {
-        enum class Type { AABB, Sphere };
-        Type type;
-        bool collisionEnabled;
-        glm::vec3 center;
-        glm::vec3 halfExtents;
-        float radius;
-        bool canSupport = true;
-    };
+    ColliderWorld colliderWorld;
+    Skybox skybox;
+    ParticleSystem explosionParticles;
+    ShadowMap shadowMap;
+
     std::vector<Object*> objects;
-    std::vector<Light*> lights;
-    std::vector<ExplosionParticle> explosionParticles;
     std::vector<glm::mat4> extraCubeModels;
-    std::vector<SceneCollider> sceneColliders;
+
+    // Scene layout
     glm::vec3 centerPillarBaseCenter;
-    float centerPillarHeight;
-    float centerPillarHalfWidth;
+    float centerPillarHeight = 1.0f;
+    float centerPillarHalfWidth = 0.2f;
     glm::vec3 beamSourcePos;
-    glm::vec3 beamDirection;
-    int centerPillarColliderIndex;
-    float centerPillarOffsetZ;
-    float centerPillarRailMin;
-    float centerPillarRailMax;
+    glm::vec3 beamDirection{1.0f, 0.0f, 0.0f};
+    int centerPillarColliderIndex = -1;
+    float centerPillarOffsetZ = 0.0f;
+    float centerPillarRailMin = 0.0f;
+    float centerPillarRailMax = 0.0f;
     glm::mat4 railModel;
-    GLuint targetVAO;
-    GLuint targetVBO;
-    int targetVertexCount;
+    float worldCollisionHalfExtent = 14.0f;
+    float groundTopY = -1.0f;
+    float scenePillarHeight = 5.8f;
+    float sceneCeilingThickness = 0.6f;
+
+    // Beam targets
+    GLuint targetVAO = 0;
+    GLuint targetVBO = 0;
+    int targetVertexCount = 0;
     glm::vec3 targetPosition;
-    float targetHitTolerance;
-    float targetActivationTimer;
-    float targetActivationDuration;
-    bool targetActivated;
-    GLuint prismVAO;
-    GLuint prismVBO;
-    int prismVertexCount;
-    Shader* prismShader;
-    glm::vec3 prismCenter;
-    float prismRadius;
-    glm::vec3 prismDeflectDirection;
-    int deflectorPillarColliderIndex;
-    float deflectorPillarOffsetX;
-    float deflectorRailMin;
-    float deflectorRailMax;
-    glm::mat4 deflectorRailModel;
-    glm::vec3 deflectorPillarBase;
+    float targetHitTolerance = 0.18f;
+    float targetActivationTimer = 0.0f;
+    float targetActivationDuration = 3.0f;
+    bool targetActivated = false;
     glm::vec3 target2Position;
     glm::mat4 target2ModelMatrix;
-    float target2ActivationTimer;
-    bool target2Activated;
+    float target2ActivationTimer = 0.0f;
+    bool target2Activated = false;
     glm::mat4 target1ModelMatrix;
 
-    // Shaders
-    Shader* phongShader;
-    Shader* lampShader;
-    Shader* cubemapShader;
-    Shader* crosshairShader;
-    Shader* shadowDepthShader;
-    Object* lightMarker;
-    Object* groundObject;
-    Object* capturePillarMesh;
+    // Deflector prism + pillar
+    GLuint prismVAO = 0;
+    GLuint prismVBO = 0;
+    int prismVertexCount = 0;
+    Shader* prismShader = nullptr;
+    glm::vec3 prismCenter;
+    float prismRadius = 0.33f;
+    glm::vec3 prismDeflectDirection{0.0f, 0.0f, 1.0f};
+    int deflectorPillarColliderIndex = -1;
+    float deflectorPillarOffsetX = 0.0f;
+    float deflectorRailMin = 0.0f;
+    float deflectorRailMax = 0.0f;
+    glm::mat4 deflectorRailModel;
+    glm::vec3 deflectorPillarBase;
     glm::mat4 capturePillarModelMatrix;
     glm::mat4 deflectorPillarModelMatrix;
-    GLuint capturePillarMetalTexture;
-    bool capturePillarMetalTextureLoaded;
-    GLuint skyboxVAO;
-    GLuint skyboxVBO;
-    GLuint cubemapTexture;
-    GLuint crosshairVAO;
-    GLuint crosshairVBO;
-    GLuint groundDiffuseTexture;
-    bool groundDiffuseTextureLoaded;
-    GLuint pillarDiffuseTexture;
-    bool pillarDiffuseTextureLoaded;
-    GLuint shadowMapFBO;
-    GLuint shadowMapTexture;
-    glm::mat4 lightSpaceMatrix;
-    // Occludeurs statiques du plafond : shadow map regeneree quand un pilier bouge (§7.4 p. 235).
-    bool staticShadowMapsBuilt;
-    GLuint dynamicShadowMapTexture;
-    glm::mat4 dynamicLightSpaceMatrix;
-    glm::vec3 ceilingLightPosition;
-    int viewportWidth;
-    int viewportHeight;
+    Object* capturePillarMesh = nullptr;
+    Texture capturePillarMetalTexture;
 
-    // Game state
-    float time;
-    bool lightProjectileActive;
-    glm::vec3 lightProjectileStart;
-    glm::vec3 lightProjectileDirection;
-    float lightProjectileLifetime;
-    float lightProjectileSpeed;
-    float lightProjectileMaxLifetime;
-    float lightProjectileMaxDistance;
-    bool lightAnchoredOnPillar;
-    bool lightAnchorAnimating;
-    float lightAnchorAnimT;
-    float lightAnchorAnimDuration;
+    // GPU resources
+    Shader* phongShader = nullptr;
+    Shader* lampShader = nullptr;
+    Shader* particleShader = nullptr;
+    Shader* cubemapShader = nullptr;
+    Shader* crosshairShader = nullptr;
+    Shader* shadowDepthShader = nullptr;
+    Object* lightMarker = nullptr;
+    Object* groundObject = nullptr;
+    Texture groundDiffuseTexture;
+    Texture pillarDiffuseTexture;
+    GLuint crosshairVAO = 0;
+    GLuint crosshairVBO = 0;
+
+    // Lighting
+    glm::vec3 ceilingLightPosition;
+    float ceilingLightStrength = 2.4f;
+    float ceilingLightRange = 8.0f;
+    glm::vec3 ceilingLightColor{1.0f, 0.88f, 0.38f};
+    glm::vec3 lightPosition{0.0f};
+    bool lightProjectileActive = false;
+    glm::vec3 lightProjectileDirection{0.0f, 0.0f, -1.0f};
+    float lightProjectileLifetime = 0.0f;
+    float lightProjectileSpeed = 9.0f;
+    float lightProjectileMaxLifetime = 1.8f;
+    float lightProjectileMaxDistance = 14.0f;
+    bool lightAnchoredOnPillar = false;
+    bool lightAnchorAnimating = false;
+    float lightAnchorAnimT = 0.0f;
+    float lightAnchorAnimDuration = 0.45f;
     glm::vec3 lightAnchorSourcePos;
     glm::vec3 lightAnchorTargetPos;
-    float worldCollisionHalfExtent;
-    float groundTopY;
-    float scenePillarHeight;
-    float sceneCeilingThickness;
-    float ceilingLightStrength;
-    float ceilingLightRange;
-    glm::vec3 ceilingLightColor;
-    bool reflectionClipEnabled;
-    glm::vec4 reflectionClipPlane;
-    bool edgeClipEnabled;
-    std::array<glm::vec4, 4> edgeClipPlanes;
-    bool crosshairVisible;
 
-    void setupSkybox();
+    // Viewport / HUD
+    int viewportWidth = 800;
+    int viewportHeight = 600;
+    bool crosshairVisible = true;
+
+    struct BeamTrace {
+        int segmentCount = 0;
+        glm::vec3 starts[2];
+        glm::vec3 ends[2];
+        float lengths[2] = {0.0f, 0.0f};
+    };
+
+    BeamTrace traceAnchoredBeam(float maxDistance) const;
+
     void setupCrosshair();
-    void renderSkybox(const glm::mat4& view, const glm::mat4& projection);
     void renderCrosshair();
     void renderSceneOpaque(
         const glm::mat4& view,
@@ -159,11 +145,7 @@ private:
     );
     void renderShadowMap();
     void disableLightProjectile();
-    void spawnLightExplosion(const glm::vec3& position);
-    void updateExplosionParticles(float deltaTime);
-    void renderExplosionParticles(const glm::mat4& view, const glm::mat4& projection);
     void rebuildSceneColliders();
-    bool isCollidingWithScene(const glm::vec3& point) const;
     bool isSegmentCollidingWithScene(const glm::vec3& start, const glm::vec3& end, float radius) const;
     bool raycastScene(
         const glm::vec3& origin,
@@ -188,14 +170,6 @@ private:
     void drawMovablePillarPhong(const glm::mat4& pillarModelMatrix);
     void drawMovablePillarShadows();
     void renderPlanarShadows(const glm::mat4& view, const glm::mat4& projection);
-    bool raySphereIntersect(
-        const glm::vec3& origin,
-        const glm::vec3& direction,
-        const glm::vec3& sphereCenter,
-        float sphereRadius,
-        float maxDistance,
-        float& outDistance
-    ) const;
 };
 
 #endif

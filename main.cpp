@@ -3,39 +3,30 @@
 #include <GLFW/glfw3.h>
 
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "import/stb/stb_image.h"
 
-#include "src/shader.h"
-#include "src/camera.h"
-#include "src/object.h"
 #include "src/Game.h"
-#include "src/GameInternal.h"
+#include "src/Player.h"
 
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-Camera camera(glm::vec3(1.6f, 4.5f, 4.8f));
-float lastX = SCR_WIDTH / 2.0f;
-float lastY = SCR_HEIGHT / 2.0f;
-bool firstMouse = true;
+Player player(glm::vec3(1.6f, 4.5f, 4.8f));
 bool g_isPaused = false;
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 Game* g_game = nullptr;
 float g_groundHeight = -1.0f;
-const float CAMERA_EYE_HEIGHT = 1.0f;
-const float CAMERA_COLLISION_RADIUS = 0.35f;
 
+void updateViewport(GLFWwindow* window);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+void window_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
-void updateCameraPhysics();
 void setPauseState(GLFWwindow* window, bool paused);
 
 int main(int argc, char* argv[])
@@ -49,7 +40,7 @@ int main(int argc, char* argv[])
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Mon Projet OpenGL", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "SpacePuzzle", NULL, NULL);
     if (window == NULL) {
         std::cout << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -57,6 +48,7 @@ int main(int argc, char* argv[])
     }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetWindowSizeCallback(window, window_size_callback);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetScrollCallback(window, scroll_callback);
 
@@ -71,19 +63,15 @@ int main(int argc, char* argv[])
 
     Game game;
     g_game = &game;
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
-    glViewport(0, 0, framebufferWidth, framebufferHeight);
-    game.SetViewportSize(framebufferWidth, framebufferHeight);
+    updateViewport(window);
     g_groundHeight = game.GetGroundHeight();
-    camera.Position.x = 1.6f;
-    camera.Position.z = 4.8f;
-    camera.Position.y = g_groundHeight + CAMERA_EYE_HEIGHT;
-    std::cout << "Controles:" << std::endl;
-    std::cout << "  F   -> tirer un projectile de lumiere" << std::endl;
-    std::cout << "  P   -> pause/reprendre (libere/reprend la souris)" << std::endl;
-    std::cout << "  C   -> afficher/masquer le curseur de visee" << std::endl;
+    player.camera.Position.x = 1.6f;
+    player.camera.Position.z = 4.8f;
+    player.camera.Position.y = g_groundHeight + Player::kEyeHeight;
+    std::cout << "Controls:" << std::endl;
+    std::cout << "  F   -> fire a light projectile" << std::endl;
+    std::cout << "  P   -> pause/resume (release/recapture mouse)" << std::endl;
+    std::cout << "  C   -> show/hide crosshair" << std::endl;
 
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = glfwGetTime();
@@ -91,15 +79,13 @@ int main(int argc, char* argv[])
         lastFrame = currentFrame;
 
         processInput(window);
-        updateCameraPhysics();
-
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        player.updatePhysics(game, g_groundHeight, g_isPaused);
+        updateViewport(window);
 
         if (!g_isPaused) {
             game.Update(deltaTime);
         }
-        game.Render(camera);
+        game.Render(player);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -114,17 +100,13 @@ void processInput(GLFWwindow* window) {
     static bool keyPPressedLastFrame = false;
     static bool keyCPressedLastFrame = false;
 
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, true);
+    }
 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera.ProcessKeyboard(FORWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera.ProcessKeyboard(BACKWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera.ProcessKeyboard(LEFT, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera.ProcessKeyboard(RIGHT, deltaTime);
+    if (!g_isPaused) {
+        player.processKeyboard(window, deltaTime);
+    }
 
     bool keyFPressed = (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
     bool keyPPressed = (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS);
@@ -145,73 +127,70 @@ void processInput(GLFWwindow* window) {
 
     if (g_game != nullptr) {
         if (keyFPressed && !keyFPressedLastFrame) {
-            g_game->FireLightProjectile(camera.Position, camera.Front);
+            g_game->FireLightProjectile(player.camera.Position, player.camera.Front);
         }
     }
 
     keyFPressedLastFrame = keyFPressed;
 }
 
-void updateCameraPhysics() {
-    if (g_isPaused) {
+void updateViewport(GLFWwindow* window) {
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+    if (framebufferWidth <= 0 || framebufferHeight <= 0) {
         return;
     }
 
-    float supportY = g_groundHeight;
+    glViewport(0, 0, framebufferWidth, framebufferHeight);
     if (g_game != nullptr) {
-        supportY = g_game->GetSupportHeightAtPosition(camera.Position, CAMERA_COLLISION_RADIUS);
-    }
-    camera.Position.y = supportY + CAMERA_EYE_HEIGHT;
-
-    if (g_game != nullptr && game_internal::kEnableChapter22Collision) {
-        g_game->UpdateMovablePillar(camera.Position, CAMERA_COLLISION_RADIUS);
-        g_game->ResolveCameraCollisions(camera.Position, CAMERA_COLLISION_RADIUS);
+        g_game->SetViewportSize(framebufferWidth, framebufferHeight);
     }
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    glViewport(0, 0, width, height);
-    if (g_game != nullptr) {
-        g_game->SetViewportSize(width, height);
-    }
+    (void)width;
+    (void)height;
+    updateViewport(window);
+}
+
+void window_size_callback(GLFWwindow* window, int width, int height) {
+    (void)width;
+    (void)height;
+    updateViewport(window);
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    (void)window;
     if (g_isPaused) {
         return;
     }
-
-    if (firstMouse) {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
-    }
-
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos;
-
-    lastX = xpos;
-    lastY = ypos;
-
-    camera.ProcessMouseMovement(xoffset, yoffset);
+    player.processMouseMovement(xpos, ypos);
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    (void)window;
     if (g_isPaused) {
         return;
     }
-    camera.ProcessMouseScroll(yoffset);
+    player.processMouseScroll(yoffset);
 }
 
 void setPauseState(GLFWwindow* window, bool paused) {
     g_isPaused = paused;
-    firstMouse = true;
+    int windowWidth = 0;
+    int windowHeight = 0;
+    glfwGetWindowSize(window, &windowWidth, &windowHeight);
+    player.resetMouseState(
+        static_cast<double>(windowWidth) / 2.0,
+        static_cast<double>(windowHeight) / 2.0
+    );
 
     if (g_isPaused) {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        std::cout << "Jeu en pause." << std::endl;
+        std::cout << "Game paused." << std::endl;
     } else {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        std::cout << "Jeu repris." << std::endl;
+        std::cout << "Game resumed." << std::endl;
     }
 }

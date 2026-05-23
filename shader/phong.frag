@@ -4,27 +4,14 @@ out vec4 FragColor;
 struct Material {
     vec3 ambient;
     vec3 diffuse;
-    vec3 specular;
-    float shininess;
-};
-
-struct Light {
-    vec3 position;
-    vec3 color;
-    float ambient;
-    float diffuse;
-    float specular;
 };
 
 in vec3 FragPos;
 in vec3 Normal;
 in vec2 TexCoords;
-in vec4 FragPosLightSpace;
 in vec4 FragPosDynamicLightSpace;
 
-uniform vec3 viewPos;
 uniform Material material;
-uniform Light light;
 uniform vec3 ceilingLightPos;
 uniform vec3 ceilingLightColor;
 uniform float ceilingLightStrength;
@@ -42,13 +29,9 @@ uniform float beamLightStrengths[2];
 uniform sampler2D diffuseMap;
 uniform int useTexture;
 uniform vec2 uvScale;
-uniform sampler2D shadowMap;
-uniform int useShadowMap;
 uniform sampler2D dynamicShadowMap;
 uniform int dynamicShadowActive;
-uniform mat4 lightSpaceMatrix;
 uniform mat4 dynamicLightSpaceMatrix;
-uniform int isGroundPass;
 
 float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir, mat4 lightMat, sampler2D mapTex) {
     float cosTheta = clamp(dot(normal, lightDir), 0.0, 1.0);
@@ -75,18 +58,8 @@ void main() {
         sampledDiffuse = texture(diffuseMap, TexCoords * uvScale).rgb;
     }
 
-    vec3 ambient = light.ambient * material.ambient * light.color;
-    ambient += vec3(0.028, 0.026, 0.022) * material.ambient;
-
+    vec3 ambient = vec3(0.028, 0.026, 0.022) * material.ambient;
     vec3 norm = normalize(Normal);
-    vec3 lightDir = normalize(light.position - FragPos);
-    float diff = max(dot(norm, lightDir), 0.0);
-    vec3 diffuse = light.diffuse * diff * sampledDiffuse * light.color;
-
-    vec3 viewDir = normalize(viewPos - FragPos);
-    vec3 reflectDir = reflect(-lightDir, norm);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), material.shininess);
-    vec3 specular = light.specular * spec * material.specular * light.color;
 
     vec3 topLight = vec3(0.0);
     {
@@ -94,26 +67,8 @@ void main() {
         float ceilingDistance = length(toCeiling);
         vec3 ceilingDir = ceilingDistance > 0.0001 ? toCeiling / ceilingDistance : vec3(0.0, 1.0, 0.0);
         float ceilingAttenuation = 1.0 / (1.0 + ceilingAttLinear * ceilingDistance + ceilingAttQuadratic * ceilingDistance * ceilingDistance);
-        // Isotrope (pas de N·L) ; seule l'attenuation ci-dessus depend de la distance a la source.
         const float ceilingDiff = 1.0;
-        float localShadow = 0.0;
-        // Lumiere plafond : pas de shadow map sur les piliers (§7.1.1 sur le sol seulement).
-        if (useShadowMap != 0 && isGroundPass == 0) {
-            vec3 shadowLightDir = ceilingLightPos - FragPos;
-            if (dot(shadowLightDir, shadowLightDir) > 0.0001) {
-                shadowLightDir = normalize(shadowLightDir);
-            } else {
-                shadowLightDir = vec3(0.0, 1.0, 0.0);
-            }
-            localShadow = calculateShadow(
-                FragPosLightSpace,
-                norm,
-                shadowLightDir,
-                lightSpaceMatrix,
-                shadowMap
-            );
-        }
-        topLight += ceilingLightStrength * ceilingAttenuation * (1.0 - localShadow) * ceilingDiff * sampledDiffuse * ceilingLightColor;
+        topLight += ceilingLightStrength * ceilingAttenuation * ceilingDiff * sampledDiffuse * ceilingLightColor;
     }
 
     if (dynamicLightActive != 0) {
@@ -147,7 +102,7 @@ void main() {
         topLight += beamLightStrengths[i] * beamAttenuation * 0.95 * beamDiff * sampledDiffuse * beamLightColors[i];
     }
 
-    vec3 result = ambient + diffuse + specular + topLight;
+    vec3 result = ambient + topLight;
 
     FragColor = vec4(result, 1.0);
 }

@@ -1,11 +1,12 @@
 #Template for INFOH502
 #Heavily inspired from https://github.com/Polytonic/Glitter/blob/master/CMakeLists.txt
 
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+
 #project setup
-project(MonProjetOpenGL)
+project(SpacePuzzle)
 
 #set the minimal version of cmake and the minimal version of the c++ language
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
@@ -52,7 +53,15 @@ set(SOURCES_COMMON
     src/Game_Render.cpp
     src/Game_Physics.cpp
     src/GameInternal.cpp
-    src/Light.cpp
+    src/Collider.cpp
+    src/Skybox.cpp
+    src/ParticleSystem.cpp
+    src/ShadowMap.cpp
+    src/Player.cpp
+    src/Texture.cpp
+    src/shader.cpp
+    src/camera.cpp
+    src/object.cpp
 )
 
 set(SOURCES_main

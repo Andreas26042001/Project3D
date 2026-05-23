@@ -1,119 +1,23 @@
 #include "Game.h"
 #include "GameInternal.h"
 #include "shader.h"
-#include "camera.h"
 #include "object.h"
-#include "Light.h"
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <glm/gtc/matrix_transform.hpp>
 
-Game::Game() : time(0.0f),
-               lightProjectileActive(false),
-               lightProjectileStart(glm::vec3(0.0f)),
-               lightProjectileDirection(glm::vec3(0.0f, 0.0f, -1.0f)),
-               lightProjectileLifetime(0.0f),
-               lightProjectileSpeed(9.0f),
-               lightProjectileMaxLifetime(1.8f),
-               lightProjectileMaxDistance(14.0f),
-               lightAnchoredOnPillar(false),
-               lightAnchorAnimating(false),
-               lightAnchorAnimT(0.0f),
-               lightAnchorAnimDuration(0.45f),
-               lightAnchorSourcePos(glm::vec3(0.0f)),
-               lightAnchorTargetPos(glm::vec3(0.0f)),
-               centerPillarBaseCenter(glm::vec3(0.0f)),
-               centerPillarHeight(1.0f),
-               centerPillarHalfWidth(0.2f),
-               beamSourcePos(glm::vec3(0.0f)),
-               beamDirection(glm::vec3(1.0f, 0.0f, 0.0f)),
-               centerPillarColliderIndex(-1),
-               centerPillarOffsetZ(0.0f),
-               centerPillarRailMin(0.0f),
-               centerPillarRailMax(0.0f),
-               railModel(glm::mat4(1.0f)),
-               targetVAO(0),
-               targetVBO(0),
-               targetVertexCount(0),
-               targetPosition(glm::vec3(0.0f)),
-               targetHitTolerance(0.18f),
-               targetActivationTimer(0.0f),
-               targetActivationDuration(3.0f),
-               targetActivated(false),
-               prismVAO(0),
-               prismVBO(0),
-               prismVertexCount(0),
-               prismShader(nullptr),
-               prismCenter(glm::vec3(0.0f)),
-               prismRadius(0.33f),
-               prismDeflectDirection(glm::vec3(0.0f, 0.0f, 1.0f)),
-               deflectorPillarColliderIndex(-1),
-               deflectorPillarOffsetX(0.0f),
-               deflectorRailMin(0.0f),
-               deflectorRailMax(0.0f),
-               deflectorRailModel(glm::mat4(1.0f)),
-               deflectorPillarBase(glm::vec3(0.0f)),
-               target2Position(glm::vec3(0.0f)),
-               target2ModelMatrix(glm::mat4(1.0f)),
-               target2ActivationTimer(0.0f),
-               target2Activated(false),
-               target1ModelMatrix(glm::mat4(1.0f)),
-               worldCollisionHalfExtent(14.0f),
-               groundTopY(-1.0f),
-               scenePillarHeight(5.8f),
-               sceneCeilingThickness(0.6f),
-               ceilingLightStrength(2.4f),
-               ceilingLightRange(8.0f),
-               ceilingLightColor(1.0f, 0.88f, 0.38f),
-               reflectionClipEnabled(false),
-               reflectionClipPlane(0.0f, 0.0f, 1.0f, 0.0f),
-               edgeClipEnabled(false),
-               edgeClipPlanes{
-                   glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
-                   glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
-                   glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
-                   glm::vec4(0.0f, 0.0f, 1.0f, 0.0f)
-               },
-               crosshairVisible(true),
-               groundDiffuseTexture(0),
-               groundDiffuseTextureLoaded(false),
-               pillarDiffuseTexture(0),
-               pillarDiffuseTextureLoaded(false),
-               capturePillarMesh(nullptr),
-               capturePillarModelMatrix(glm::mat4(1.0f)),
-               deflectorPillarModelMatrix(glm::mat4(1.0f)),
-               capturePillarMetalTexture(0),
-               capturePillarMetalTextureLoaded(false),
-               shadowMapFBO(0),
-               shadowMapTexture(0),
-               lightSpaceMatrix(1.0f),
-               staticShadowMapsBuilt(false),
-               dynamicShadowMapTexture(0),
-               dynamicLightSpaceMatrix(1.0f),
-               ceilingLightPosition(glm::vec3(0.0f)),
-               viewportWidth(800),
-               viewportHeight(600) {
+Game::Game() {
     // Initialize shaders
     phongShader = new Shader(game_internal::shaderPath("phong.vert").c_str(), game_internal::shaderPath("phong.frag").c_str());
     lampShader = new Shader(game_internal::shaderPath("lamp.vert").c_str(), game_internal::shaderPath("lamp.frag").c_str());
+    particleShader = new Shader(game_internal::shaderPath("particle.vert").c_str(), game_internal::shaderPath("particle.frag").c_str());
     cubemapShader = new Shader(game_internal::shaderPath("cubemap.vert").c_str(), game_internal::shaderPath("cubemap.frag").c_str());
     shadowDepthShader = new Shader(game_internal::shaderPath("shadow_depth.vert").c_str(), game_internal::shaderPath("shadow_depth.frag").c_str());
-    const std::string crosshairVertexCode = R"(
-        #version 330 core
-        layout (location = 0) in vec2 aPos;
-        void main() {
-            gl_Position = vec4(aPos, 0.0, 1.0);
-        }
-    )";
-    const std::string crosshairFragmentCode = R"(
-        #version 330 core
-        out vec4 FragColor;
-        uniform vec3 crosshairColor;
-        void main() {
-            FragColor = vec4(crosshairColor, 1.0);
-        }
-    )";
-    crosshairShader = new Shader(crosshairVertexCode, crosshairFragmentCode);
+    crosshairShader = new Shader(
+        game_internal::shaderPath("crosshair.vert").c_str(),
+        game_internal::shaderPath("crosshair.frag").c_str()
+    );
 
     // Load objects
     Object* cube = new Object(game_internal::objectPath("cube.obj").c_str());
@@ -123,12 +27,12 @@ Game::Game() : time(0.0f),
     capturePillarMesh = new Object(game_internal::objectPath("capture_pillar.obj").c_str());
     if (!capturePillarMesh->vertices.empty()) {
         capturePillarMesh->makeObject(*phongShader);
-        std::cout << "Maillage OBJ des piliers mobiles charge (" << capturePillarMesh->vertices.size()
-                  << " sommets).\n";
+        std::cout << "Loaded movable pillar OBJ mesh (" << capturePillarMesh->vertices.size()
+                  << " vertices).\n";
     } else {
         delete capturePillarMesh;
         capturePillarMesh = nullptr;
-        std::cerr << "ERREUR: capture_pillar.obj absent ou illisible — piliers mobiles non rendus.\n";
+        std::cerr << "ERROR: capture_pillar.obj missing or unreadable — movable pillars will not render.\n";
     }
 
     // Rectangular pillars arranged as a full scene grid.
@@ -140,7 +44,7 @@ Game::Game() : time(0.0f),
     const int gridRadius = 3;
     for (int gx = -gridRadius; gx <= gridRadius; ++gx) {
         for (int gz = -gridRadius; gz <= gridRadius; ++gz) {
-            // Le centre est reserve pour le petit pilier "receptacle" de la lampe.
+            // Center slot reserved for the small lamp "receiver" pillar.
             if (gx == 0 && gz == 0) {
                 continue;
             }
@@ -157,17 +61,17 @@ Game::Game() : time(0.0f),
         }
     }
 
-    // Petit pilier "receptacle" au centre, hauteur egale a l'oeil de la camera
-    // (= groundTopY + CAMERA_EYE_HEIGHT). Sert de socle pour aspirer la lampe.
-    // Il est mobile sur l'axe Z grace au rail.
+    // Small "receiver" pillar at the center, height equal to the camera eye
+    // (= groundTopY + CAMERA_EYE_HEIGHT). Serves as a base to capture the lamp.
+    // It moves along Z via the rail.
     centerPillarBaseCenter = glm::vec3(0.0f, groundTopY, 0.0f);
 
-    // Le rayon part de la source bleue au-dessus du pilier, vers +X.
+    // Beam starts from the blue source above the pillar, toward +X.
     beamDirection = glm::vec3(1.0f, 0.0f, 0.0f);
 
-    // Rail au sol qui guide visuellement le deplacement du petit pilier.
-    // Il est aligne sur Z, perpendiculaire a la direction du rayon (+X).
-    // Le rail n'a ni collider ni ombre: il est rendu separement dans renderSceneOpaque.
+    // Ground rail that visually guides the small pillar's movement.
+    // Aligned on Z, perpendicular to the beam direction (+X).
+    // The rail has no collider or shadow: it is rendered separately in renderSceneOpaque.
     const float railLength = 4.0f;
     const float railHalfWidthX = 0.08f;
     const float railHalfHeightY = 0.015f;
@@ -177,20 +81,19 @@ Game::Game() : time(0.0f),
     railModel = glm::translate(railModel, glm::vec3(0.0f, groundTopY + railHalfHeightY, 0.0f));
     railModel = glm::scale(railModel, glm::vec3(railHalfWidthX * 2.0f, railHalfHeightY * 2.0f, railLength));
 
-    // Initialise la matrice du pilier ; invalide la shadow map statique (§7.4 p. 235).
+    // Initialize pillar matrix.
     rebuildCenterPillarTransform();
 
-    // 2eme pilier identique au pilier emetteur, porte la pyramide deflectrice.
-    // Place sur la trajectoire balayee par le rayon (+X), mobile sur un rail
-    // aligne sur X (perpendiculaire au rayon devie +Z).
+    // Second pillar identical to the emitter pillar, carries the deflector pyramid.
+    // Placed on the path swept by the beam (+X), movable on a rail
+    // aligned on X (perpendicular to the deflected beam +Z).
     const float kDeflectorPillarX = 5.5f;
     const float kDeflectorPillarZ = -1.5f;
     prismDeflectDirection = glm::vec3(0.0f, 0.0f, 1.0f);
     deflectorPillarBase = glm::vec3(kDeflectorPillarX, groundTopY, kDeflectorPillarZ);
 
-    // Rail au sol qui guide le pilier deflecteur. Aligne sur X (perpendiculaire au
-    // rayon devie). Comme pour le rail central, il est purement decoratif: pas de
-    // collider ni d'ombre.
+    // Ground rail that guides the deflector pillar. Aligned on X (perpendicular to the
+    // deflected beam). Like the center rail, it is purely decorative: no collider or shadow.
     const float kDeflectorRailLength = 4.0f;
     const float kDeflectorRailHalfWidthZ = 0.08f;
     const float kDeflectorRailHalfHeightY = 0.015f;
@@ -206,7 +109,7 @@ Game::Game() : time(0.0f),
         glm::vec3(kDeflectorRailLength, kDeflectorRailHalfHeightY * 2.0f, kDeflectorRailHalfWidthZ * 2.0f)
     );
 
-    // Initialise pilier deflecteur + position de la pyramide a partir des parametres.
+    // Initialize deflector pillar + pyramid position from parameters.
     rebuildDeflectorPillarTransform();
 
     // Add a ceiling at pillar height, using the same textured cube pass.
@@ -226,8 +129,8 @@ Game::Game() : time(0.0f),
     );
     extraCubeModels.push_back(ceilingModel);
 
-    // Perimetre : rangees de piliers a la place des murs, avec un petit pan de mur
-    // entre deux piliers pour accueillir chaque cible bleue.
+    // Perimeter: rows of pillars instead of walls, with a small wall section
+    // between two pillars to host each blue target.
     const float edgeInset = mapHalfExtent - pillarHalfWidth;
     const float kTarget1Z = 0.8f;
     const float kTarget2X = deflectorPillarBase.x - 1.0f;
@@ -284,7 +187,7 @@ Game::Game() : time(0.0f),
     southTargetWall = glm::scale(southTargetWall, glm::vec3(kTargetWallSpan, wallHeight, wallThickness));
     extraCubeModels.push_back(southTargetWall);
 
-    // Lampe juste sous la dalle : eclaire la face inferieure du plafond (normale -Y).
+    // Lamp just below the slab: lights the underside of the ceiling (normal -Y).
     ceilingLightPosition = glm::vec3(
         0.0f,
         groundTopY + scenePillarHeight - sceneCeilingThickness - 0.12f,
@@ -299,123 +202,52 @@ Game::Game() : time(0.0f),
     const float groundSpan = (worldCollisionHalfExtent * 2.0f) + 0.6f;
     groundObject->model = glm::scale(groundObject->model, glm::vec3(groundSpan, 0.5f, groundSpan));
 
-    const std::vector<std::string> diffuseCandidates = {
-        game_internal::texturePath("ground/Ground081_1K-JPG/Ground081_1K-JPG_Color.jpg"),
-        game_internal::texturePath("ground/Ground081_1K-JPG_Color.jpg")
-    };
-    for (const auto& texturePath : diffuseCandidates) {
-        if (!game_internal::fileExists(texturePath)) {
-            continue;
-        }
-        groundDiffuseTexture = game_internal::loadTexture2D(texturePath);
-        if (groundDiffuseTexture != 0) {
-            groundDiffuseTextureLoaded = true;
-            std::cout << "Texture du sol chargee: " << texturePath << std::endl;
-            break;
-        }
-    }
-    if (!groundDiffuseTextureLoaded) {
-        std::cout << "INFO: aucune image diffuse de sol trouvee, rendu couleur utilise." << std::endl;
-    }
-
-    const std::vector<std::string> pillarDiffuseCandidates = {
-        game_internal::texturePath("pillars/Bricks075B_2K-JPG/Bricks075B_2K-JPG_Color.jpg"),
-        game_internal::texturePath("pillars/Bricks075B_2K-JPG_Color.jpg")
-    };
-    for (const auto& texturePath : pillarDiffuseCandidates) {
-        if (!game_internal::fileExists(texturePath)) {
-            continue;
-        }
-        pillarDiffuseTexture = game_internal::loadTexture2D(texturePath);
-        if (pillarDiffuseTexture != 0) {
-            pillarDiffuseTextureLoaded = true;
-            std::cout << "Texture des piliers chargee: " << texturePath << std::endl;
-            break;
-        }
-    }
-    if (!pillarDiffuseTextureLoaded) {
-        std::cout << "INFO: aucune image diffuse de piliers trouvee, rendu couleur utilise." << std::endl;
-    }
-
-    const std::vector<std::string> captureMetalCandidates = {
-        game_internal::texturePath("Metal055A_2K-JPG/Metal055A_2K-JPG_Color.jpg"),
-        game_internal::texturePath("Metal055A_2K-JPG_Color.jpg")
-    };
-    for (const auto& texturePath : captureMetalCandidates) {
-        if (!game_internal::fileExists(texturePath)) {
-            continue;
-        }
-        capturePillarMetalTexture = game_internal::loadTexture2D(texturePath);
-        if (capturePillarMetalTexture != 0) {
-            capturePillarMetalTextureLoaded = true;
-            std::cout << "Texture metal du pilier recepteur chargee: " << texturePath << std::endl;
-            break;
-        }
-    }
-    if (!capturePillarMetalTextureLoaded) {
-        std::cout << "INFO: texture metal Metal055 pour le pilier recepteur introuvable." << std::endl;
-    }
-
-    // Shadow map statique pour la lumiere du plafond (RTR4 §7.4 p. 234-235, Williams 1978).
-    // Passe profondeur seule : GL_DRAW_BUFFER=GL_NONE (§7.4). CLAMP_TO_BORDER + bord blanc :
-    // texels hors frustum lus comme entierement eclaires (profondeur lointaine).
-    glGenFramebuffers(1, &shadowMapFBO);
-    glGenTextures(1, &shadowMapTexture);
-    glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, game_internal::kShadowMapSize, game_internal::kShadowMapSize, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    const float borderColor[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-    glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
-    glDrawBuffer(GL_NONE);
-    glReadBuffer(GL_NONE);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    // Dynamic shadow map for the player-carried light (RTR4 §7.4 p. 234, recalculee chaque frame).
-    glGenTextures(1, &dynamicShadowMapTexture);
-    glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, game_internal::kShadowMapSize, game_internal::kShadowMapSize, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    const float dynamicBorderColor[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, dynamicBorderColor);
-
-    setupSkybox();
-    setupCrosshair();
-    setupBeamTarget();
-    if (game_internal::kEnableChapter14Translucency) {
-        setupDeflectorPrism();
-    }
-
-    // Setup lights
-    Light* mainLight = new Light(
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.30f, 0.60f, 1.00f),
-        0.02f,
-        0.0f,
-        0.0f
+    groundDiffuseTexture = Texture::loadFromFile2D(
+        game_internal::texturePath("ground/Ground081_1K-JPG/Ground081_1K-JPG_Color.jpg")
     );
-    lights.push_back(mainLight);
+    if (groundDiffuseTexture.isValid()) {
+        std::cout << "Ground texture loaded: " << groundDiffuseTexture.path() << std::endl;
+    } else {
+        std::cout << "INFO: no ground diffuse map found, using flat color rendering." << std::endl;
+    }
+
+    pillarDiffuseTexture = Texture::loadFromFile2D(
+        game_internal::texturePath("pillars/Bricks075B_2K-JPG/Bricks075B_2K-JPG_Color.jpg")
+    );
+    if (pillarDiffuseTexture.isValid()) {
+        std::cout << "Pillar texture loaded: " << pillarDiffuseTexture.path() << std::endl;
+    } else {
+        std::cout << "INFO: no pillar diffuse map found, using flat color rendering." << std::endl;
+    }
+
+    capturePillarMetalTexture = Texture::loadFromFile2D(
+        game_internal::texturePath("Metal055A_2K-JPG/Metal055A_2K-JPG_Color.jpg")
+    );
+    if (capturePillarMetalTexture.isValid()) {
+        std::cout << "Receiver pillar metal texture loaded: " << capturePillarMetalTexture.path() << std::endl;
+    } else {
+        std::cout << "INFO: Metal055 metal texture for receiver pillar not found." << std::endl;
+    }
+
+    shadowMap.init(game_internal::kShadowMapSize);
+    skybox.init(cubemapShader);
+    setupCrosshair();
+    explosionParticles.init(particleShader);
+    setupBeamTarget();
+    setupDeflectorPrism();
 
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
-    if (game_internal::kEnableChapter22Collision) {
-        rebuildSceneColliders();
-    }
+    rebuildSceneColliders();
 }
 
 Game::~Game() {
     for (auto obj : objects) {
         delete obj;
     }
-    for (auto light : lights) delete light;
     delete phongShader;
     delete lampShader;
+    delete particleShader;
     delete cubemapShader;
     delete crosshairShader;
     delete shadowDepthShader;
@@ -424,12 +256,6 @@ Game::~Game() {
     if (capturePillarMesh != nullptr) {
         delete capturePillarMesh;
     }
-    if (capturePillarMetalTexture != 0) {
-        glDeleteTextures(1, &capturePillarMetalTexture);
-    }
-    glDeleteVertexArrays(1, &skyboxVAO);
-    glDeleteBuffers(1, &skyboxVBO);
-    glDeleteTextures(1, &cubemapTexture);
     glDeleteVertexArrays(1, &crosshairVAO);
     glDeleteBuffers(1, &crosshairVBO);
     if (targetVAO != 0) {
@@ -445,19 +271,4 @@ Game::~Game() {
         glDeleteBuffers(1, &prismVBO);
     }
     delete prismShader;
-    if (groundDiffuseTexture != 0) {
-        glDeleteTextures(1, &groundDiffuseTexture);
-    }
-    if (pillarDiffuseTexture != 0) {
-        glDeleteTextures(1, &pillarDiffuseTexture);
-    }
-    if (shadowMapTexture != 0) {
-        glDeleteTextures(1, &shadowMapTexture);
-    }
-    if (dynamicShadowMapTexture != 0) {
-        glDeleteTextures(1, &dynamicShadowMapTexture);
-    }
-    if (shadowMapFBO != 0) {
-        glDeleteFramebuffers(1, &shadowMapFBO);
-    }
 }
