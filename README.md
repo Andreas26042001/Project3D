@@ -14,7 +14,7 @@ Jeu de puzzle en vue à la première personne dans une grotte éclairée au Phon
   - Pilier déflecteur mobile sur rail perpendiculaire + prisme translucide
   - Deux cibles murales activées par maintien du faisceau (~3 s)
 - Projectile de lumière (`F`) avec collisions et explosion de particules
-- Chargement de maillages `.obj` (cube procédural, pilier `capture_pillar.obj`)
+- Chargement de maillages `.obj` (cube procédural pour la scène statique, `capture_pillar.obj` pour les piliers mobiles)
 - Textures diffuses (sol, briques des piliers, métal du pilier récepteur)
 - Reticle de visée et mode pause
 

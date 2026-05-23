@@ -12,10 +12,6 @@ out vec4 FragPosDynamicLightSpace;
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform bool useClipPlane;
-uniform vec4 clipPlane;
-uniform bool useEdgeClipPlanes;
-uniform vec4 edgeClipPlanes[4];
 uniform mat4 lightSpaceMatrix;
 uniform mat4 dynamicLightSpaceMatrix;
 
@@ -24,13 +20,8 @@ void main() {
     FragPos = vec3(worldPos);
     Normal = mat3(transpose(inverse(model))) * aNormal;
     TexCoords = aTexCoords;
+    // Coordonnees homogenes pour l'echantillonnage de la shadow map (RTR4 §7.4 p. 234-235).
     FragPosLightSpace = lightSpaceMatrix * worldPos;
     FragPosDynamicLightSpace = dynamicLightSpaceMatrix * worldPos;
-    gl_ClipDistance[0] = useClipPlane ? dot(worldPos, clipPlane) : 1.0;
-    gl_ClipDistance[1] = useEdgeClipPlanes ? dot(worldPos, edgeClipPlanes[0]) : 1.0;
-    gl_ClipDistance[2] = useEdgeClipPlanes ? dot(worldPos, edgeClipPlanes[1]) : 1.0;
-    gl_ClipDistance[3] = useEdgeClipPlanes ? dot(worldPos, edgeClipPlanes[2]) : 1.0;
-    gl_ClipDistance[4] = useEdgeClipPlanes ? dot(worldPos, edgeClipPlanes[3]) : 1.0;
-
     gl_Position = projection * view * worldPos;
 }

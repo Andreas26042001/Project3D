@@ -7,6 +7,40 @@
 #include <cmath>
 #include <vector>
 
+namespace {
+
+glm::mat4 buildCapturePillarModelMatrix(
+    const glm::vec3& baseCenter,
+    float groundY,
+    float halfWidth,
+    float height
+) {
+    // Boite englobante du mesh capture_pillar.obj (Blender export) — ancrage au sol
+    // et mise a l'echelle sur l'empreinte de collision des piliers mobiles.
+    const float meshXMin = -1.1012f;
+    const float meshXMax = 1.1012f;
+    const float meshYMin = -1.0f;
+    const float meshYMax = 3.693571f;
+    const float meshZMin = -1.1012f;
+    const float meshZMax = 1.1012f;
+    const glm::vec3 meshBottomCenter(
+        (meshXMin + meshXMax) * 0.5f,
+        meshYMin,
+        (meshZMin + meshZMax) * 0.5f
+    );
+    const float meshSpanX = meshXMax - meshXMin;
+    const float meshSpanY = meshYMax - meshYMin;
+    const float meshSpanZ = meshZMax - meshZMin;
+    const float scaleX = (halfWidth * 2.0f) / meshSpanX;
+    const float scaleY = height / meshSpanY;
+    const float scaleZ = (halfWidth * 2.0f) / meshSpanZ;
+    return glm::translate(glm::mat4(1.0f), glm::vec3(baseCenter.x, groundY, baseCenter.z))
+        * glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ))
+        * glm::translate(glm::mat4(1.0f), -meshBottomCenter);
+}
+
+} // namespace
+
 void Game::Update(float deltaTime) {
     time += deltaTime;
     updateExplosionParticles(deltaTime);
@@ -51,9 +85,9 @@ void Game::Update(float deltaTime) {
             lightAnchorAnimating = true;
             lightAnchorAnimT = 0.0f;
             lightAnchorSourcePos = nextPosition;
-            lightAnchorTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
+            lightAnchorTargetPos = pillarTop + glm::vec3(0.0f, kLightSourceOffsetY, 0.0f);
             lights[0]->position = nextPosition;
-            lightProjectileDirection = cannonDirection;
+            lightProjectileDirection = beamDirection;
             return;
         }
 
@@ -323,100 +357,36 @@ void Game::renderExplosionParticles(const glm::mat4& view, const glm::mat4& proj
 void Game::rebuildCenterPillarTransform() {
     const float baseZ = centerPillarOffsetZ;
     centerPillarBaseCenter = glm::vec3(0.0f, groundTopY, baseZ);
-
-    // Boite englobante du mesh capture_pillar.obj (Blender export) — ancrage au sol,
-    // mise a l'echelle sur la meme empreinte que l'ancien cube (collision inchangee).
-    const float meshXMin = -1.1012f;
-    const float meshXMax = 1.1012f;
-    const float meshYMin = -1.0f;
-    const float meshYMax = 3.693571f;
-    const float meshZMin = -1.1012f;
-    const float meshZMax = 1.1012f;
-    const glm::vec3 meshBottomCenter(
-        (meshXMin + meshXMax) * 0.5f,
-        meshYMin,
-        (meshZMin + meshZMax) * 0.5f
+    capturePillarModelMatrix = buildCapturePillarModelMatrix(
+        centerPillarBaseCenter,
+        groundTopY,
+        centerPillarHalfWidth,
+        centerPillarHeight
     );
-    const float meshSpanX = meshXMax - meshXMin;
-    const float meshSpanY = meshYMax - meshYMin;
-    const float meshSpanZ = meshZMax - meshZMin;
-    const float scaleX = (centerPillarHalfWidth * 2.0f) / meshSpanX;
-    const float scaleY = centerPillarHeight / meshSpanY;
-    const float scaleZ = (centerPillarHalfWidth * 2.0f) / meshSpanZ;
-    capturePillarModelMatrix =
-        glm::translate(glm::mat4(1.0f), glm::vec3(centerPillarBaseCenter.x, groundTopY, centerPillarBaseCenter.z))
-        * glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ))
-        * glm::translate(glm::mat4(1.0f), -meshBottomCenter);
 
-    if (centerPillarColliderIndex >= 0 &&
-        centerPillarColliderIndex < static_cast<int>(extraCubeModels.size())) {
-        const float centerY = groundTopY + centerPillarHeight * 0.5f;
-        glm::mat4 m = glm::mat4(1.0f);
-        m = glm::translate(m, glm::vec3(0.0f, centerY, baseZ));
-        m = glm::scale(
-            m,
-            glm::vec3(centerPillarHalfWidth * 2.0f, centerPillarHeight, centerPillarHalfWidth * 2.0f)
-        );
-        extraCubeModels[centerPillarColliderIndex] = m;
-    }
+    beamSourcePos = centerPillarBaseCenter + glm::vec3(0.0f, centerPillarHeight + kLightSourceOffsetY, 0.0f);
 
-    if (cannonColliderIndex >= 0 &&
-        cannonColliderIndex < static_cast<int>(extraCubeModels.size())) {
-        const float cannonCenterX = centerPillarHalfWidth + cannonLength * 0.5f;
-        const float cannonCenterY = groundTopY + centerPillarHeight - cannonHalfWidth;
-        glm::mat4 m = glm::mat4(1.0f);
-        m = glm::translate(m, glm::vec3(cannonCenterX, cannonCenterY, baseZ));
-        m = glm::scale(
-            m,
-            glm::vec3(cannonLength, cannonHalfWidth * 2.0f, cannonHalfWidth * 2.0f)
-        );
-        extraCubeModels[cannonColliderIndex] = m;
-        cannonMuzzlePos = glm::vec3(
-            centerPillarHalfWidth + cannonLength,
-            cannonCenterY,
-            baseZ
-        );
-    }
+    lightAnchorTargetPos = beamSourcePos;
 
-    if (centerPillarShadowIndex >= 0 &&
-        centerPillarShadowIndex < static_cast<int>(pillarBaseCenters.size())) {
-        pillarBaseCenters[centerPillarShadowIndex] = centerPillarBaseCenter;
-    }
-
-    if (lightAnchoredOnPillar) {
-        const glm::vec3 pillarTop = centerPillarBaseCenter + glm::vec3(0.0f, centerPillarHeight, 0.0f);
-        lightAnchorTargetPos = pillarTop + glm::vec3(0.0f, 0.18f, 0.0f);
-    }
-
-    // Force la regeneration des shadow maps statiques: les occluders ont bouge.
+    // Regeneration de la shadow map statique : les casters ont bouge (RTR4 §7.4 p. 235).
     staticShadowMapsBuilt = false;
 }
 
 void Game::rebuildDeflectorPillarTransform() {
     const float baseX = deflectorPillarBase.x + deflectorPillarOffsetX;
     const float baseZ = deflectorPillarBase.z;
+    const glm::vec3 deflectorBaseCenter(baseX, groundTopY, baseZ);
+    deflectorPillarModelMatrix = buildCapturePillarModelMatrix(
+        deflectorBaseCenter,
+        groundTopY,
+        centerPillarHalfWidth,
+        centerPillarHeight
+    );
 
-    if (deflectorPillarColliderIndex >= 0 &&
-        deflectorPillarColliderIndex < static_cast<int>(extraCubeModels.size())) {
-        const float centerY = groundTopY + deflectorPillarHeight * 0.5f;
-        glm::mat4 m = glm::mat4(1.0f);
-        m = glm::translate(m, glm::vec3(baseX, centerY, baseZ));
-        m = glm::scale(
-            m,
-            glm::vec3(centerPillarHalfWidth * 2.0f, deflectorPillarHeight, centerPillarHalfWidth * 2.0f)
-        );
-        extraCubeModels[deflectorPillarColliderIndex] = m;
-    }
+    // Prisme a la hauteur du rayon, au-dessus du sommet du pilier deflecteur.
+    prismCenter = glm::vec3(baseX, groundTopY + centerPillarHeight + kLightSourceOffsetY, baseZ);
 
-    if (deflectorPillarShadowIndex >= 0 &&
-        deflectorPillarShadowIndex < static_cast<int>(pillarBaseCenters.size())) {
-        pillarBaseCenters[deflectorPillarShadowIndex] = glm::vec3(baseX, groundTopY, baseZ);
-    }
-
-    // La pyramide deflectrice est ancree juste au-dessus du sommet du pilier
-    // deflecteur, a la hauteur exacte du rayon principal.
-    prismCenter = glm::vec3(baseX, groundTopY + centerPillarHeight - cannonHalfWidth, baseZ);
-
+    // Regeneration de la shadow map statique (RTR4 §7.4 p. 235).
     staticShadowMapsBuilt = false;
 }
 
@@ -427,9 +397,8 @@ void Game::UpdateMovablePillar(const glm::vec3& cameraPosition, float cameraRadi
 
     // Hauteur de l'oeil au-dessus des pieds. Doit rester aligne sur CAMERA_EYE_HEIGHT
     // dans main.cpp. On teste l'intersection verticale [pieds, tete] avec l'AABB du
-    // pilier au lieu du seul point oeil: sans ca, pour un pilier plus petit que
-    // l'oeil (deflecteur a 0.6m), l'oeil passe au-dessus de l'AABB et le push ne se
-    // declenche jamais alors que le corps du joueur l'intersecte bien.
+    // pilier au lieu du seul point oeil: sans ca, l'oeil passe au-dessus de l'AABB
+    // et le push ne se declenche jamais alors que le corps du joueur l'intersecte.
     const float kCameraBodyHeight = 1.0f;
     const float playerFeetY = cameraPosition.y - kCameraBodyHeight;
     const float playerHeadY = cameraPosition.y;
@@ -476,10 +445,10 @@ void Game::UpdateMovablePillar(const glm::vec3& cameraPosition, float cameraRadi
     // Pilier deflecteur: rail aligne sur X, on pousse sur X quand la penetration X
     // est dominante. Independant du test du pilier central.
     if (deflectorPillarColliderIndex >= 0) {
-        const glm::vec3 dHalf(centerPillarHalfWidth, deflectorPillarHeight * 0.5f, centerPillarHalfWidth);
+        const glm::vec3 dHalf(centerPillarHalfWidth, centerPillarHeight * 0.5f, centerPillarHalfWidth);
         const glm::vec3 dCenter(
             deflectorPillarBase.x + deflectorPillarOffsetX,
-            groundTopY + deflectorPillarHeight * 0.5f,
+            groundTopY + centerPillarHeight * 0.5f,
             deflectorPillarBase.z
         );
         const glm::vec3 dExp = dHalf + glm::vec3(cameraRadius);
@@ -517,6 +486,8 @@ void Game::rebuildSceneColliders() {
     }
 
     sceneColliders.clear();
+    centerPillarColliderIndex = -1;
+    deflectorPillarColliderIndex = -1;
 
     for (const auto& cubeModel : extraCubeModels) {
         SceneCollider extraCubeCollider;
@@ -532,19 +503,38 @@ void Game::rebuildSceneColliders() {
         sceneColliders.push_back(extraCubeCollider);
     }
 
-    // Les piliers mobiles ne doivent pas servir de surface de support pour la camera:
-    // sinon, en s'approchant, le joueur grimpe dessus avant que UpdateMovablePillar
-    // ne le pousse. On ne peut donc plus se tenir sur le pilier deflecteur (trop bas
-    // pour etre une marche credible) ni sur le pilier central recepteur. Les autres
-    // tests de collision (push, blocage horizontal) restent intacts.
-    if (deflectorPillarColliderIndex >= 0 &&
-        deflectorPillarColliderIndex < static_cast<int>(sceneColliders.size())) {
-        sceneColliders[deflectorPillarColliderIndex].canSupport = false;
-    }
-    if (centerPillarColliderIndex >= 0 &&
-        centerPillarColliderIndex < static_cast<int>(sceneColliders.size())) {
-        sceneColliders[centerPillarColliderIndex].canSupport = false;
-    }
+    auto addMovablePillarCollider = [&](const glm::vec3& center, float halfWidth, float height, int& outIndex) {
+        SceneCollider pillarCollider;
+        pillarCollider.type = SceneCollider::Type::AABB;
+        pillarCollider.collisionEnabled = true;
+        pillarCollider.center = center;
+        pillarCollider.halfExtents = glm::vec3(halfWidth, height * 0.5f, halfWidth);
+        pillarCollider.radius = 0.0f;
+        pillarCollider.canSupport = false;
+        outIndex = static_cast<int>(sceneColliders.size());
+        sceneColliders.push_back(pillarCollider);
+    };
+
+    addMovablePillarCollider(
+        glm::vec3(
+            centerPillarBaseCenter.x,
+            groundTopY + centerPillarHeight * 0.5f,
+            centerPillarBaseCenter.z
+        ),
+        centerPillarHalfWidth,
+        centerPillarHeight,
+        centerPillarColliderIndex
+    );
+    addMovablePillarCollider(
+        glm::vec3(
+            deflectorPillarBase.x + deflectorPillarOffsetX,
+            groundTopY + centerPillarHeight * 0.5f,
+            deflectorPillarBase.z
+        ),
+        centerPillarHalfWidth,
+        centerPillarHeight,
+        deflectorPillarColliderIndex
+    );
 
     SceneCollider groundCollider;
     groundCollider.type = SceneCollider::Type::AABB;

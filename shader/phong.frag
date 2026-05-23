@@ -30,7 +30,7 @@ uniform vec3 ceilingLightColor;
 uniform float ceilingLightStrength;
 uniform float ceilingAttLinear;
 uniform float ceilingAttQuadratic;
-uniform bool dynamicLightActive;
+uniform int dynamicLightActive;
 uniform vec3 dynamicLightPos;
 uniform vec3 dynamicLightColor;
 uniform float dynamicLightStrength;
@@ -40,28 +40,20 @@ uniform vec3 beamLightEnds[2];
 uniform vec3 beamLightColors[2];
 uniform float beamLightStrengths[2];
 uniform sampler2D diffuseMap;
-uniform bool useTexture;
+uniform int useTexture;
 uniform vec2 uvScale;
 uniform sampler2D shadowMap;
-uniform bool useShadowMap;
+uniform int useShadowMap;
 uniform sampler2D dynamicShadowMap;
-uniform bool dynamicShadowActive;
+uniform int dynamicShadowActive;
 uniform mat4 lightSpaceMatrix;
 uniform mat4 dynamicLightSpaceMatrix;
-uniform bool isGroundPass;
-uniform int pillarShadowCount;
-uniform vec3 pillarShadowCenters[64];
-uniform float pillarShadowRadius;
-uniform float pillarShadowStrength;
-uniform samplerCube environmentMap;
-uniform bool useEnvironmentReflection;
-uniform float reflectionStrength;
+uniform int isGroundPass;
 
 float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir, mat4 lightMat, sampler2D mapTex) {
     float cosTheta = clamp(dot(normal, lightDir), 0.0, 1.0);
     float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-    const float normalOffsetScale = 0.012;
-    vec4 shifted = fragPosLightSpace + lightMat * vec4(normal, 0.0) * (normalOffsetScale * sinTheta);
+    vec4 shifted = fragPosLightSpace + lightMat * vec4(normal, 0.0) * (0.01 * sinTheta);
 
     vec3 projCoords = shifted.xyz / max(shifted.w, 0.0001);
     projCoords = projCoords * 0.5 + 0.5;
@@ -71,14 +63,15 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir, mat4 l
         return 0.0;
     }
 
-    float currentDepth = projCoords.z - 0.00002;
+    float facing = clamp(dot(normalize(normal), normalize(lightDir)), 0.0, 1.0);
+    float currentDepth = projCoords.z - 0.00005 - (1.0 - facing) * 0.002;
     float closestDepth = texture(mapTex, projCoords.xy).r;
     return currentDepth > closestDepth ? 1.0 : 0.0;
 }
 
 void main() {
     vec3 sampledDiffuse = material.diffuse;
-    if (useTexture) {
+    if (useTexture != 0) {
         sampledDiffuse = texture(diffuseMap, TexCoords * uvScale).rgb;
     }
 
@@ -96,34 +89,45 @@ void main() {
     vec3 specular = light.specular * spec * material.specular * light.color;
 
     vec3 topLight = vec3(0.0);
-    float shadowFactor = 0.0;
     {
         vec3 toCeiling = ceilingLightPos - FragPos;
         float ceilingDistance = length(toCeiling);
-        vec3 ceilingDir = normalize(toCeiling);
+        vec3 ceilingDir = ceilingDistance > 0.0001 ? toCeiling / ceilingDistance : vec3(0.0, 1.0, 0.0);
         float ceilingAttenuation = 1.0 / (1.0 + ceilingAttLinear * ceilingDistance + ceilingAttQuadratic * ceilingDistance * ceilingDistance);
-        float ceilingDiff = pow(max(dot(norm, ceilingDir), 0.0), 2.8);
+        // Isotrope (pas de N·L) ; seule l'attenuation ci-dessus depend de la distance a la source.
+        const float ceilingDiff = 1.0;
         float localShadow = 0.0;
-        if (useShadowMap) {
-            localShadow = calculateShadow(FragPosLightSpace, norm, ceilingDir, lightSpaceMatrix, shadowMap);
+        // Lumiere plafond : pas de shadow map sur les piliers (§7.1.1 sur le sol seulement).
+        if (useShadowMap != 0 && isGroundPass == 0) {
+            vec3 shadowLightDir = ceilingLightPos - FragPos;
+            if (dot(shadowLightDir, shadowLightDir) > 0.0001) {
+                shadowLightDir = normalize(shadowLightDir);
+            } else {
+                shadowLightDir = vec3(0.0, 1.0, 0.0);
+            }
+            localShadow = calculateShadow(
+                FragPosLightSpace,
+                norm,
+                shadowLightDir,
+                lightSpaceMatrix,
+                shadowMap
+            );
         }
-        shadowFactor = localShadow;
-        topLight += ceilingLightStrength * ceilingAttenuation * 0.10 * material.ambient * ceilingLightColor;
-        topLight += ceilingLightStrength * ceilingAttenuation * (1.0 - 0.72 * localShadow) * 0.95 * ceilingDiff * sampledDiffuse * ceilingLightColor;
+        topLight += ceilingLightStrength * ceilingAttenuation * (1.0 - localShadow) * ceilingDiff * sampledDiffuse * ceilingLightColor;
     }
 
-    if (dynamicLightActive) {
+    if (dynamicLightActive != 0) {
         vec3 toDynamic = dynamicLightPos - FragPos;
         float dynamicDistance = length(toDynamic);
         vec3 dynamicDir = normalize(toDynamic);
         float dynamicAttenuation = 1.0 / (1.0 + ceilingAttLinear * dynamicDistance + ceilingAttQuadratic * dynamicDistance * dynamicDistance);
         float dynamicDiff = pow(max(dot(norm, dynamicDir), 0.0), 2.8);
         float dynamicShadow = 0.0;
-        if (dynamicShadowActive) {
+        if (dynamicShadowActive != 0) {
             dynamicShadow = calculateShadow(FragPosDynamicLightSpace, norm, dynamicDir, dynamicLightSpaceMatrix, dynamicShadowMap);
         }
         topLight += dynamicLightStrength * dynamicAttenuation * 0.10 * material.ambient * dynamicLightColor;
-        topLight += dynamicLightStrength * dynamicAttenuation * (1.0 - 0.82 * dynamicShadow) * 0.95 * dynamicDiff * sampledDiffuse * dynamicLightColor;
+        topLight += dynamicLightStrength * dynamicAttenuation * (1.0 - dynamicShadow) * dynamicDiff * sampledDiffuse * dynamicLightColor;
     }
 
     for (int i = 0; i < 2; ++i) {
@@ -144,29 +148,6 @@ void main() {
     }
 
     vec3 result = ambient + diffuse + specular + topLight;
-    if (useShadowMap) {
-        result *= (1.0 - 0.35 * shadowFactor);
-    }
-
-    if (isGroundPass && pillarShadowCount > 0) {
-        float maxShadow = 0.0;
-        for (int i = 0; i < 64; ++i) {
-            if (i >= pillarShadowCount) {
-                break;
-            }
-            vec2 toCenter = FragPos.xz - pillarShadowCenters[i].xz;
-            float dist = length(toCenter);
-            float localShadow = 1.0 - smoothstep(0.0, pillarShadowRadius, dist);
-            maxShadow = max(maxShadow, localShadow);
-        }
-        result *= (1.0 - pillarShadowStrength * maxShadow);
-    }
-
-    if (useEnvironmentReflection) {
-        vec3 R = reflect(-viewDir, norm);
-        vec3 envColor = texture(environmentMap, R).rgb;
-        result = mix(result, envColor, reflectionStrength);
-    }
 
     FragColor = vec4(result, 1.0);
 }

@@ -4,11 +4,223 @@
 #include "camera.h"
 #include "object.h"
 #include "Light.h"
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <string>
 #include <vector>
+
+namespace {
+
+// RTR4 §7.1.1 Eq. 7.4 : projection d'un point depuis une lumiere ponctuelle
+// sur le plan pi : plane·x = 0 avec plane = (nx, ny, nz, d).
+glm::mat4 buildPlanarShadowMatrix(const glm::vec4& lightPos, const glm::vec4& plane) {
+    const float dot = glm::dot(plane, lightPos);
+    return glm::mat4(
+        dot - lightPos.x * plane.x, -lightPos.y * plane.x, -lightPos.z * plane.x, -lightPos.w * plane.x,
+        -lightPos.x * plane.y, dot - lightPos.y * plane.y, -lightPos.z * plane.y, -lightPos.w * plane.y,
+        -lightPos.x * plane.z, -lightPos.y * plane.z, dot - lightPos.z * plane.z, -lightPos.w * plane.z,
+        -lightPos.x * plane.w, -lightPos.y * plane.w, -lightPos.z * plane.w, dot - lightPos.w * plane.w
+    );
+}
+
+bool isCeilingShadowCaster(const glm::mat4& modelMatrix) {
+    return std::abs(modelMatrix[1][1]) >= 1.0f;
+}
+
+// §7.1.1 : seuls les piliers (empreinte etroite) projettent une ombre sur le sol.
+bool isPlanarShadowCaster(const glm::mat4& modelMatrix) {
+    if (!isCeilingShadowCaster(modelMatrix)) {
+        return false;
+    }
+    const float sx = std::abs(modelMatrix[0][0]);
+    const float sz = std::abs(modelMatrix[2][2]);
+    return sx <= 1.0f && sz <= 1.0f;
+}
+
+float groundTopFromModel(const glm::mat4& groundModel) {
+    return groundModel[3][1] + std::abs(groundModel[1][1]) * 0.5f;
+}
+
+} // namespace
+
+void Game::drawMovablePillarPhong(const glm::mat4& pillarModelMatrix) {
+    if (capturePillarMesh == nullptr || phongShader == nullptr) {
+        return;
+    }
+
+    phongShader->setMat4("model", pillarModelMatrix);
+    if (capturePillarMetalTextureLoaded) {
+        glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.8f, 1.8f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, capturePillarMetalTexture);
+        phongShader->setInt("useTexture", 1);
+        phongShader->setVec3("material.specular", glm::vec3(0.72f, 0.74f, 0.78f));
+        phongShader->setFloat("material.shininess", 112.0f);
+    } else if (pillarDiffuseTextureLoaded) {
+        phongShader->setInt("useTexture", 1);
+        glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.75f, 5.5f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, pillarDiffuseTexture);
+        phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
+        phongShader->setFloat("material.shininess", 18.0f);
+    } else {
+        phongShader->setInt("useTexture", 0);
+        phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
+        phongShader->setFloat("material.shininess", 18.0f);
+    }
+    // Mesh Blender : pas de shadow map §7.4 (auto-ombre ortho).
+    phongShader->setInt("useShadowMap", 0);
+    capturePillarMesh->draw();
+    phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
+    phongShader->setFloat("material.shininess", 18.0f);
+    if (pillarDiffuseTextureLoaded || capturePillarMetalTextureLoaded) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    phongShader->setInt("useTexture", 0);
+    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.0f, 1.0f);
+}
+
+void Game::drawMovablePillarShadows() {
+    // Passe profondeur §7.4 : seuls les objets qui projettent une ombre (casters).
+    if (capturePillarMesh == nullptr || shadowDepthShader == nullptr) {
+        return;
+    }
+
+    shadowDepthShader->setMat4("model", capturePillarModelMatrix);
+    capturePillarMesh->draw();
+    shadowDepthShader->setMat4("model", deflectorPillarModelMatrix);
+    capturePillarMesh->draw();
+}
+
+void Game::renderPlanarShadows(const glm::mat4& view, const glm::mat4& projection) {
+    // RTR4 §7.1.1 : projection geometrique ; stencil limite le recepteur au sol marque.
+    if (objects.empty() || lampShader == nullptr || groundObject == nullptr) {
+        return;
+    }
+
+    const glm::mat4& groundModel = groundObject->model;
+    const float groundTop = groundTopFromModel(groundModel);
+    const float groundHalfX = std::abs(groundModel[0][0]) * 0.5f;
+    const float groundHalfZ = std::abs(groundModel[2][2]) * 0.5f;
+    const glm::vec4 groundPlane(0.0f, 1.0f, 0.0f, -groundTop);
+    const glm::mat4 shadowMatrix = buildPlanarShadowMatrix(
+        glm::vec4(ceilingLightPosition, 1.0f),
+        groundPlane
+    );
+    const std::array<glm::vec4, 4> groundClipPlanes = {
+        glm::vec4( 1.0f, 0.0f, 0.0f, groundHalfX),
+        glm::vec4(-1.0f, 0.0f, 0.0f, groundHalfX),
+        glm::vec4( 0.0f, 0.0f, 1.0f, groundHalfZ),
+        glm::vec4( 0.0f, 0.0f,-1.0f, groundHalfZ),
+    };
+
+    const GLboolean blendWasEnabled = glIsEnabled(GL_BLEND);
+    GLint previousBlendSrc = GL_ONE;
+    GLint previousBlendDst = GL_ZERO;
+    glGetIntegerv(GL_BLEND_SRC_RGB, &previousBlendSrc);
+    glGetIntegerv(GL_BLEND_DST_RGB, &previousBlendDst);
+
+    GLboolean depthMaskEnabled = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMaskEnabled);
+    const GLboolean depthTestWasEnabled = glIsEnabled(GL_DEPTH_TEST);
+    GLint previousDepthFunc = GL_LESS;
+    glGetIntegerv(GL_DEPTH_FUNC, &previousDepthFunc);
+
+    const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+    const GLboolean polyOffsetWasEnabled = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+    GLfloat previousPolyOffsetFactor = 0.0f;
+    GLfloat previousPolyOffsetUnits = 0.0f;
+    glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &previousPolyOffsetFactor);
+    glGetFloatv(GL_POLYGON_OFFSET_UNITS, &previousPolyOffsetUnits);
+
+    GLboolean clipEnabled[4] = {GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE};
+    for (int i = 0; i < 4; ++i) {
+        clipEnabled[i] = glIsEnabled(static_cast<GLenum>(GL_CLIP_DISTANCE1 + i));
+        glEnable(GL_CLIP_DISTANCE1 + i);
+    }
+
+    const GLboolean stencilWasEnabled = glIsEnabled(GL_STENCIL_TEST);
+    GLint previousStencilFunc = GL_EQUAL;
+    GLint previousStencilRef = 0;
+    GLint previousStencilMask = 0xFF;
+    glGetIntegerv(GL_STENCIL_FUNC, &previousStencilFunc);
+    glGetIntegerv(GL_STENCIL_REF, &previousStencilRef);
+    glGetIntegerv(GL_STENCIL_VALUE_MASK, &previousStencilMask);
+
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0x00);
+    glStencilFunc(GL_EQUAL, 1, 0xFF);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ZERO, GL_SRC_COLOR);
+    // Depth test : l'ombre est au niveau du sol ; les piliers (deja rendus) la masquent.
+    // glPolygonOffset evite le z-fighting avec le sol (RTR4 §7.4 p. 236-237).
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-1.0f, -4.0f);
+    glDisable(GL_CULL_FACE);
+
+    lampShader->use();
+    lampShader->setMat4("view", view);
+    lampShader->setMat4("projection", projection);
+    lampShader->setInt("useClipPlane", 0);
+    lampShader->setInt("useEdgeClipPlanes", 1);
+    for (int i = 0; i < 4; ++i) {
+        lampShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", groundClipPlanes[i]);
+    }
+    lampShader->setVec3("lightColor", glm::vec3(0.42f, 0.42f, 0.42f));
+
+    auto drawProjectedCaster = [&](const glm::mat4& casterModel, Object& mesh) {
+        lampShader->setMat4("model", shadowMatrix * casterModel);
+        mesh.draw();
+    };
+
+    for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
+        if (!isPlanarShadowCaster(extraCubeModels[ci])) {
+            continue;
+        }
+        drawProjectedCaster(extraCubeModels[ci], *objects[0]);
+    }
+    if (capturePillarMesh != nullptr) {
+        drawProjectedCaster(capturePillarModelMatrix, *capturePillarMesh);
+        drawProjectedCaster(deflectorPillarModelMatrix, *capturePillarMesh);
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        if (!clipEnabled[i]) {
+            glDisable(GL_CLIP_DISTANCE1 + i);
+        }
+    }
+    if (!stencilWasEnabled) {
+        glDisable(GL_STENCIL_TEST);
+    } else {
+        glStencilFunc(previousStencilFunc, previousStencilRef, previousStencilMask);
+    }
+    glPolygonOffset(previousPolyOffsetFactor, previousPolyOffsetUnits);
+    if (!polyOffsetWasEnabled) {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+    }
+    if (cullWasEnabled) {
+        glEnable(GL_CULL_FACE);
+    } else {
+        glDisable(GL_CULL_FACE);
+    }
+    glDepthMask(depthMaskEnabled);
+    glDepthFunc(previousDepthFunc);
+    if (depthTestWasEnabled) {
+        glEnable(GL_DEPTH_TEST);
+    } else {
+        glDisable(GL_DEPTH_TEST);
+    }
+    glBlendFunc(previousBlendSrc, previousBlendDst);
+    if (!blendWasEnabled) {
+        glDisable(GL_BLEND);
+    }
+}
 
 void Game::renderShadowMap() {
     // Standard shadow-map generation pass: render the scene from each light into a depth
@@ -35,41 +247,11 @@ void Game::renderShadowMap() {
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.5f, 4.0f);
 
-    // La lumiere du plafond et ses occluders (piliers, plafond) ne bougent pas :
-    // la shadow map n'est calculee qu'une fois au demarrage (RTR4 §7.4 p. 235).
-    if (!staticShadowMapsBuilt) {
-        const glm::vec3 shadowTarget(0.0f, groundTopY + 1.2f, 0.0f);
-        const glm::mat4 lightProjection = glm::ortho(-18.0f, 18.0f, -18.0f, 18.0f, 0.5f, 45.0f);
-        const glm::mat4 lightView = glm::lookAt(ceilingLightPosition, shadowTarget, glm::vec3(0.0f, 1.0f, 0.0f));
-        lightSpaceMatrix = lightProjection * lightView;
-
-        shadowDepthShader->use();
-        shadowDepthShader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
-        glViewport(0, 0, game_internal::kShadowMapSize, game_internal::kShadowMapSize);
-        glBindFramebuffer(GL_FRAMEBUFFER, shadowMapFBO);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowMapTexture, 0);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_FRONT);
-
-        for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
-            const glm::mat4& cubeModel = extraCubeModels[ci];
-            shadowDepthShader->setMat4("model", cubeModel);
-            if (static_cast<int>(ci) == centerPillarColliderIndex && capturePillarMesh != nullptr) {
-                shadowDepthShader->setMat4("model", capturePillarModelMatrix);
-                capturePillarMesh->draw();
-            } else {
-                objects[0]->draw();
-            }
-        }
-
-        shadowDepthShader->setMat4("model", groundObject->model);
-        groundObject->draw();
-        staticShadowMapsBuilt = true;
-    }
+    // Pas de shadow map statique pour la lumiere plafond : ombres planaires sur le sol (§7.1.1).
+    lightSpaceMatrix = glm::mat4(1.0f);
 
     if (!lights.empty() && (lightProjectileActive || lightAnchoredOnPillar)) {
-        // Shadow map for the projectile or pillar-anchored light.
+        // Shadow map dynamique : lumiere ponctuelle mobile, recalculee chaque frame (§7.4 p. 234).
         const glm::vec3 rawEye = lights[0]->position;
         glm::vec3 forward = lightProjectileDirection;
         if (glm::length(forward) < 0.0001f) {
@@ -88,7 +270,7 @@ void Game::renderShadowMap() {
         const glm::mat4 dynamicView = glm::lookAt(shadowEye, shadowTarget, glm::vec3(0.0f, 1.0f, 0.0f));
         glm::mat4 viewProj = dynamicProjection * dynamicView;
 
-        // (b) Anchor-based texel snap of the principal point in NDC.
+        // (b) Snap texel NDC pour stabiliser l'echantillonnage frame a frame (RTR4 §7.4 p. 239).
         const glm::vec4 anchorClip = viewProj * glm::vec4(shadowTarget, 1.0f);
         if (std::abs(anchorClip.w) > 1.0e-5f) {
             const glm::vec2 anchorNDC(anchorClip.x / anchorClip.w,
@@ -113,20 +295,17 @@ void Game::renderShadowMap() {
         glClear(GL_DEPTH_BUFFER_BIT);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
+        glPolygonOffset(1.5f, 4.0f);
 
-        // Only shadow-casters are rendered here: the ground is a pure receiver and is
-        // intentionally omitted to save work (RTR4 §7.4 p. 234 — "only objects that can
-        // cast shadows need to be rendered" into the light's view).
+        // Recepteurs omis ; seuls les casters alimentent la carte (RTR4 §7.4 p. 234-235).
         for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
-            const glm::mat4& cubeModel = extraCubeModels[ci];
-            shadowDepthShader->setMat4("model", cubeModel);
-            if (static_cast<int>(ci) == centerPillarColliderIndex && capturePillarMesh != nullptr) {
-                shadowDepthShader->setMat4("model", capturePillarModelMatrix);
-                capturePillarMesh->draw();
-            } else {
-                objects[0]->draw();
+            if (!isCeilingShadowCaster(extraCubeModels[ci])) {
+                continue;
             }
+            shadowDepthShader->setMat4("model", extraCubeModels[ci]);
+            objects[0]->draw();
         }
+        drawMovablePillarShadows();
     } else {
         dynamicLightSpaceMatrix = glm::mat4(1.0f);
     }
@@ -146,7 +325,8 @@ void Game::renderShadowMap() {
 void Game::Render(Camera& camera) {
     syncCarriedLight(camera.Position, camera.Front);
     renderShadowMap();
-    glm::mat4 projection = camera.GetProjectionMatrix();
+    const float aspect = static_cast<float>(viewportWidth) / static_cast<float>(std::max(1, viewportHeight));
+    glm::mat4 projection = camera.GetProjectionMatrix(glm::radians(camera.Zoom), aspect);
     const glm::vec3 playerWorldPosition = camera.Position - glm::normalize(camera.Front) * 0.5f + glm::vec3(0.0f, -0.55f, 0.0f);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -157,9 +337,9 @@ void Game::Render(Camera& camera) {
 
     glm::mat4 view = camera.GetViewMatrix();
     renderSceneOpaque(view, projection, camera.Position, playerWorldPosition);
+    // Skybox en dernier : GL_LEQUAL + depth mask off, ne remplit que le fond (RTR4 / LAB03 ex08).
     renderSkybox(view, projection);
-    // LAB03 ex09/ex10 : l'objet cubemap se dessine avant le skybox, OU après si
-    // translucide — ici après pour que le skybox (depth=1) ne recouvre pas le prisme.
+    // LAB03 ex09/ex10 : prisme cubemap apres la scene opaque.
     if (game_internal::kEnableChapter14Translucency) {
         renderDeflectorPrism(view, projection, camera.Position);
     }
@@ -177,40 +357,50 @@ void Game::renderSceneOpaque(
     const glm::vec3& cameraPosition,
     const glm::vec3& playerWorldPosition
 ) {
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+    for (int i = 0; i < 4; ++i) {
+        glDisable(static_cast<GLenum>(GL_CLIP_DISTANCE1 + i));
+    }
+
     const bool dynamicLightActive = !lights.empty() && (lightProjectileActive || lightAnchoredOnPillar);
-    const glm::vec3 dynamicLightColor(0.30f, 0.60f, 1.00f);
-    const float dynamicLightStrength = 1.6f;
-    const glm::vec3 beamColor(0.30f, 0.60f, 1.00f);
-    const float kBeamStrength = 1.8f;
-    const float kMaxBeamDistance = 40.0f;
     const bool beamActive = !lights.empty() && lightAnchoredOnPillar && !lightAnchorAnimating;
+    const glm::vec3 dynamicLightColor(0.30f, 0.60f, 1.00f);
+    const float dynamicLightStrength = lightAnchoredOnPillar ? 1.0f : 1.6f;
+    const glm::vec3 beamColor(0.30f, 0.60f, 1.00f);
+    const float kBeamStrength = beamActive ? 1.0f : 1.8f;
+    const float kMaxBeamDistance = 40.0f;
 
     int beamCount = 0;
-    glm::vec3 beamStarts[2] = {cannonMuzzlePos, cannonMuzzlePos};
-    glm::vec3 beamEnds[2] = {cannonMuzzlePos, cannonMuzzlePos};
+    glm::vec3 beamStarts[2] = {beamSourcePos, beamSourcePos};
+    glm::vec3 beamEnds[2] = {beamSourcePos, beamSourcePos};
     float beamLengths[2] = {0.0f, 0.0f};
 
     if (beamActive) {
+        const glm::vec3 beamOrigin = lights[0]->position;
         glm::vec3 hit(0.0f);
         float dist = 0.0f;
         const bool hitSomething = game_internal::kEnableChapter22Collision && raycastScene(
-            cannonMuzzlePos, cannonDirection, kMaxBeamDistance,
-            cannonColliderIndex, hit, dist
+            beamOrigin, beamDirection, kMaxBeamDistance,
+            centerPillarColliderIndex, hit, dist
         );
         if (!hitSomething) {
             dist = kMaxBeamDistance;
-            hit = cannonMuzzlePos + cannonDirection * kMaxBeamDistance;
+            hit = beamOrigin + beamDirection * kMaxBeamDistance;
         }
 
         float prismHitDist = 0.0f;
         const bool prismHit = game_internal::kEnableChapter14Translucency && raySphereIntersect(
-            cannonMuzzlePos, cannonDirection, prismCenter,
+            beamOrigin, beamDirection, prismCenter,
             prismRadius, dist, prismHitDist
         );
 
         if (prismHit) {
-            beamStarts[0] = cannonMuzzlePos;
-            beamEnds[0] = cannonMuzzlePos + cannonDirection * prismHitDist;
+            beamStarts[0] = beamOrigin;
+            beamEnds[0] = beamOrigin + beamDirection * prismHitDist;
             beamLengths[0] = prismHitDist;
             beamCount = 1;
 
@@ -218,7 +408,7 @@ void Game::renderSceneOpaque(
             float dDist = 0.0f;
             const bool dGotHit = game_internal::kEnableChapter22Collision && raycastScene(
                 prismCenter, prismDeflectDirection, kMaxBeamDistance,
-                cannonColliderIndex, dHit, dDist
+                centerPillarColliderIndex, dHit, dDist
             );
             if (!dGotHit) {
                 dDist = kMaxBeamDistance;
@@ -229,7 +419,7 @@ void Game::renderSceneOpaque(
             beamLengths[1] = dDist;
             beamCount = 2;
         } else {
-            beamStarts[0] = cannonMuzzlePos;
+            beamStarts[0] = beamOrigin;
             beamEnds[0] = hit;
             beamLengths[0] = dist;
             beamCount = 1;
@@ -240,9 +430,10 @@ void Game::renderSceneOpaque(
         phongShader->setVec3("ceilingLightPos", ceilingLightPosition);
         phongShader->setVec3("ceilingLightColor", ceilingLightColor);
         phongShader->setFloat("ceilingLightStrength", ceilingLightStrength);
-        const float rangeFactor = std::max(0.2f, ceilingLightRange);
-        phongShader->setFloat("ceilingAttLinear", 0.11f / rangeFactor);
-        phongShader->setFloat("ceilingAttQuadratic", 0.15f / (rangeFactor * rangeFactor));
+        // Attenuation ponctuelle : ~25 % de l'intensite a ceilingLightRange metres (isotrope, distance seule).
+        const float rangeFactor = std::max(1.0f, ceilingLightRange);
+        phongShader->setFloat("ceilingAttLinear", 1.0f / rangeFactor);
+        phongShader->setFloat("ceilingAttQuadratic", 2.0f / (rangeFactor * rangeFactor));
         phongShader->setInt("dynamicLightActive", dynamicLightActive ? 1 : 0);
         if (dynamicLightActive) {
             phongShader->setVec3("dynamicLightPos", lights[0]->position);
@@ -270,9 +461,8 @@ void Game::renderSceneOpaque(
         phongShader->setMat4("projection", projection);
         phongShader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
         phongShader->setMat4("dynamicLightSpaceMatrix", dynamicLightSpaceMatrix);
-        phongShader->setInt("useClipPlane", reflectionClipEnabled ? 1 : 0);
-        phongShader->setVec4("clipPlane", reflectionClipPlane);
-        phongShader->setInt("useShadowMap", 1);
+        // Piliers/murs/plafond : eclairage plafond sans shadow map ; sol : §7.1.1.
+        phongShader->setInt("useShadowMap", 0);
         phongShader->setInt("shadowMap", 1);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
@@ -280,77 +470,21 @@ void Game::renderSceneOpaque(
         glActiveTexture(GL_TEXTURE5);
         glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
         glActiveTexture(GL_TEXTURE0);
-        phongShader->setInt("useEdgeClipPlanes", edgeClipEnabled ? 1 : 0);
-        for (int i = 0; i < 4; ++i) {
-            phongShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
-        }
         applyPhongLightingUniforms(false);
         phongShader->setInt("useTexture", 0);
         phongShader->setInt("diffuseMap", 0);
-        phongShader->setInt("pillarShadowCount", 0);
-        phongShader->setInt("useEnvironmentReflection", 0);
         glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.0f, 1.0f);
         phongShader->setVec3("material.ambient", glm::vec3(0.10f, 0.10f, 0.10f));
         phongShader->setVec3("material.diffuse", glm::vec3(1.0f, 1.0f, 1.0f));
         phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
         phongShader->setFloat("material.shininess", 18.0f);
         phongShader->setVec3("viewPos", cameraPosition);
-        auto drawCapturePillar = [&]() -> bool {
-            if (capturePillarMesh == nullptr) {
-                return false;
-            }
-            phongShader->setMat4("model", capturePillarModelMatrix);
-            if (capturePillarMetalTextureLoaded) {
-                glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.8f, 1.8f);
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, capturePillarMetalTexture);
-                phongShader->setInt("useTexture", 1);
-                phongShader->setVec3("material.specular", glm::vec3(0.72f, 0.74f, 0.78f));
-                phongShader->setFloat("material.shininess", 112.0f);
-            } else if (pillarDiffuseTextureLoaded) {
-                const float sx = std::abs(capturePillarModelMatrix[0][0]);
-                const float sy = std::abs(capturePillarModelMatrix[1][1]);
-                const float sz = std::abs(capturePillarModelMatrix[2][2]);
-                phongShader->setInt("useTexture", 1);
-                if (sy < 1.0f) {
-                    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 12.0f, 12.0f);
-                } else if (sx > 10.0f || sz > 10.0f) {
-                    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 12.0f, 4.0f);
-                } else {
-                    glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.75f, 5.5f);
-                }
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, pillarDiffuseTexture);
-            } else {
-                phongShader->setInt("useTexture", 0);
-            }
-            glActiveTexture(GL_TEXTURE6);
-            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
-            phongShader->setInt("environmentMap", 6);
-            phongShader->setInt("useEnvironmentReflection", 1);
-            phongShader->setFloat("reflectionStrength", 0.55f);
-            capturePillarMesh->draw();
-            phongShader->setInt("useEnvironmentReflection", 0);
-            glActiveTexture(GL_TEXTURE6);
-            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-            phongShader->setVec3("material.specular", glm::vec3(0.14f, 0.14f, 0.14f));
-            phongShader->setFloat("material.shininess", 18.0f);
-            if (capturePillarMetalTextureLoaded || pillarDiffuseTextureLoaded) {
-                glBindTexture(GL_TEXTURE_2D, 0);
-            }
-            phongShader->setInt("useTexture", 0);
-            glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 1.0f, 1.0f);
-            return true;
-        };
 
         for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
             const glm::mat4& cubeModel = extraCubeModels[ci];
-            if (static_cast<int>(ci) == centerPillarColliderIndex && drawCapturePillar()) {
-                continue;
-            }
+            const float sy = std::abs(cubeModel[1][1]);
             if (pillarDiffuseTextureLoaded) {
                 const float sx = std::abs(cubeModel[0][0]);
-                const float sy = std::abs(cubeModel[1][1]);
                 const float sz = std::abs(cubeModel[2][2]);
 
                 phongShader->setInt("useTexture", 1);
@@ -367,9 +501,12 @@ void Game::renderSceneOpaque(
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, pillarDiffuseTexture);
             }
+            phongShader->setInt("useShadowMap", 0);
             phongShader->setMat4("model", cubeModel);
             objects[0]->draw();
         }
+        drawMovablePillarPhong(capturePillarModelMatrix);
+        drawMovablePillarPhong(deflectorPillarModelMatrix);
         if (pillarDiffuseTextureLoaded) {
             glBindTexture(GL_TEXTURE_2D, 0);
             phongShader->setInt("useTexture", 0);
@@ -382,9 +519,7 @@ void Game::renderSceneOpaque(
     phongShader->setMat4("projection", projection);
     phongShader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
     phongShader->setMat4("dynamicLightSpaceMatrix", dynamicLightSpaceMatrix);
-    phongShader->setInt("useClipPlane", reflectionClipEnabled ? 1 : 0);
-    phongShader->setVec4("clipPlane", reflectionClipPlane);
-    phongShader->setInt("useShadowMap", 1);
+    phongShader->setInt("useShadowMap", 0);
     phongShader->setInt("shadowMap", 1);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
@@ -392,25 +527,10 @@ void Game::renderSceneOpaque(
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
     glActiveTexture(GL_TEXTURE0);
-    phongShader->setInt("useEdgeClipPlanes", edgeClipEnabled ? 1 : 0);
-    for (int i = 0; i < 4; ++i) {
-        phongShader->setVec4("edgeClipPlanes[" + std::to_string(i) + "]", edgeClipPlanes[i]);
-    }
+    // Sol : pas d'echantillonnage shadow map plafond (§7.4) ; ombres via §7.1.1 juste apres.
     applyPhongLightingUniforms(true);
     phongShader->setInt("useTexture", groundDiffuseTextureLoaded ? 1 : 0);
     phongShader->setInt("diffuseMap", 0);
-    const int maxShadowPillars = 64;
-    const int shadowPillarCount = std::min(static_cast<int>(pillarBaseCenters.size()), maxShadowPillars);
-    phongShader->setInt("pillarShadowCount", shadowPillarCount);
-    if (shadowPillarCount > 0) {
-        glUniform3fv(
-            glGetUniformLocation(phongShader->ID, "pillarShadowCenters[0]"),
-            shadowPillarCount,
-            &pillarBaseCenters[0].x
-        );
-    }
-    phongShader->setFloat("pillarShadowRadius", 0.85f);
-    phongShader->setFloat("pillarShadowStrength", 0.16f);
     glUniform2f(glGetUniformLocation(phongShader->ID, "uvScale"), 6.0f, 6.0f);
     if (groundDiffuseTextureLoaded) {
         glActiveTexture(GL_TEXTURE0);
@@ -421,10 +541,18 @@ void Game::renderSceneOpaque(
     phongShader->setVec3("material.specular", glm::vec3(0.11f, 0.11f, 0.11f));
     phongShader->setFloat("material.shininess", 9.0f);
     phongShader->setVec3("viewPos", cameraPosition);
+
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0xFF);
+    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     groundObject->draw();
+    glStencilMask(0x00);
     if (groundDiffuseTextureLoaded) {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
+    renderPlanarShadows(view, projection);
+    glDisable(GL_STENCIL_TEST);
 
     if (!lights.empty()) {
         lampShader->use();
@@ -537,6 +665,10 @@ void Game::renderSceneOpaque(
     lightMarker->draw();
 
     renderExplosionParticles(view, projection);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
 }
 
 void Game::setupCrosshair() {
@@ -583,19 +715,19 @@ void Game::ToggleCrosshair() {
 }
 
 void Game::setupBeamTarget() {
-    const float kCannonY = groundTopY + centerPillarHeight - cannonHalfWidth;
+    const float kBeamY = groundTopY + centerPillarHeight + kLightSourceOffsetY;
     const float kAvoidZFightingOffset = 0.012f;
     const float kTargetWallThickness = 0.6f;
 
     // Face interieure des petits pans de mur (centre a mapHalfExtent - epaisseur/2).
     const float kWallInnerX = worldCollisionHalfExtent - kTargetWallThickness;
     const float kTarget1Z = 0.8f;
-    targetPosition = glm::vec3(kWallInnerX - kAvoidZFightingOffset, kCannonY, kTarget1Z);
+    targetPosition = glm::vec3(kWallInnerX - kAvoidZFightingOffset, kBeamY, kTarget1Z);
     target1ModelMatrix = glm::translate(glm::mat4(1.0f), targetPosition);
 
     const float kWallInnerZ = worldCollisionHalfExtent - kTargetWallThickness;
     const float kTarget2X = deflectorPillarBase.x - 1.0f;
-    target2Position = glm::vec3(kTarget2X, kCannonY, kWallInnerZ - kAvoidZFightingOffset);
+    target2Position = glm::vec3(kTarget2X, kBeamY, kWallInnerZ - kAvoidZFightingOffset);
     target2ModelMatrix = glm::translate(glm::mat4(1.0f), target2Position);
     // Le mesh est genere dans le plan local YZ (normale +X): pour aligner la cible
     // sur le mur Sud, on lui fait subir une rotation de 90 deg autour de Y.
@@ -660,18 +792,19 @@ void Game::updateBeamTarget(float deltaTime) {
     if (beamCurrentlyActive) {
         const float kMax = 60.0f;
         float beamLen = kMax;
+        const glm::vec3 beamOrigin = lights[0]->position;
 
         glm::vec3 hit(0.0f);
         float dist = 0.0f;
         const bool hitSomething = game_internal::kEnableChapter22Collision && raycastScene(
-            cannonMuzzlePos, cannonDirection, kMax,
-            cannonColliderIndex, hit, dist
+            beamOrigin, beamDirection, kMax,
+            centerPillarColliderIndex, hit, dist
         );
         const float beamLenFull = hitSomething ? dist : kMax;
 
         float prismDist = 0.0f;
         const bool prismIntercept = game_internal::kEnableChapter14Translucency && raySphereIntersect(
-            cannonMuzzlePos, cannonDirection, prismCenter,
+            beamOrigin, beamDirection, prismCenter,
             prismRadius, beamLenFull, prismDist
         );
         beamLen = prismIntercept ? prismDist : beamLenFull;
@@ -681,7 +814,7 @@ void Game::updateBeamTarget(float deltaTime) {
             float dDist = 0.0f;
             const bool dGotHit = game_internal::kEnableChapter22Collision && raycastScene(
                 prismCenter, prismDeflectDirection, kMax,
-                cannonColliderIndex, dHit, dDist
+                centerPillarColliderIndex, dHit, dDist
             );
             const float deflectedBeamLen = dGotHit ? dDist : kMax;
 
@@ -695,10 +828,10 @@ void Game::updateBeamTarget(float deltaTime) {
             }
         }
 
-        const glm::vec3 toTarget = targetPosition - cannonMuzzlePos;
-        const float t = glm::dot(toTarget, cannonDirection);
+        const glm::vec3 toTarget = targetPosition - beamOrigin;
+        const float t = glm::dot(toTarget, beamDirection);
         if (t >= 0.0f && t <= beamLen + 0.05f) {
-            const glm::vec3 closest = cannonMuzzlePos + cannonDirection * t;
+            const glm::vec3 closest = beamOrigin + beamDirection * t;
             if (glm::length(targetPosition - closest) < targetHitTolerance) {
                 target1Hit = true;
             }
@@ -951,7 +1084,9 @@ void Game::renderSkybox(const glm::mat4& view, const glm::mat4& projection) {
         return;
     }
 
+    glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
 
     cubemapShader->use();
     cubemapShader->setMat4("projection", projection);
@@ -964,5 +1099,7 @@ void Game::renderSkybox(const glm::mat4& view, const glm::mat4& projection) {
     glDrawArrays(GL_TRIANGLES, 0, 36);
 
     glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
 }

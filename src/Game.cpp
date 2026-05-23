@@ -25,13 +25,9 @@ Game::Game() : time(0.0f),
                centerPillarBaseCenter(glm::vec3(0.0f)),
                centerPillarHeight(1.0f),
                centerPillarHalfWidth(0.2f),
-               cannonMuzzlePos(glm::vec3(0.0f)),
-               cannonDirection(glm::vec3(1.0f, 0.0f, 0.0f)),
-               cannonLength(0.4f),
-               cannonHalfWidth(0.07f),
-               cannonColliderIndex(-1),
+               beamSourcePos(glm::vec3(0.0f)),
+               beamDirection(glm::vec3(1.0f, 0.0f, 0.0f)),
                centerPillarColliderIndex(-1),
-               centerPillarShadowIndex(-1),
                centerPillarOffsetZ(0.0f),
                centerPillarRailMin(0.0f),
                centerPillarRailMax(0.0f),
@@ -52,11 +48,9 @@ Game::Game() : time(0.0f),
                prismRadius(0.33f),
                prismDeflectDirection(glm::vec3(0.0f, 0.0f, 1.0f)),
                deflectorPillarColliderIndex(-1),
-               deflectorPillarShadowIndex(-1),
                deflectorPillarOffsetX(0.0f),
                deflectorRailMin(0.0f),
                deflectorRailMax(0.0f),
-               deflectorPillarHeight(0.6f),
                deflectorRailModel(glm::mat4(1.0f)),
                deflectorPillarBase(glm::vec3(0.0f)),
                target2Position(glm::vec3(0.0f)),
@@ -66,8 +60,10 @@ Game::Game() : time(0.0f),
                target1ModelMatrix(glm::mat4(1.0f)),
                worldCollisionHalfExtent(14.0f),
                groundTopY(-1.0f),
+               scenePillarHeight(5.8f),
+               sceneCeilingThickness(0.6f),
                ceilingLightStrength(2.4f),
-               ceilingLightRange(18.0f),
+               ceilingLightRange(8.0f),
                ceilingLightColor(1.0f, 0.88f, 0.38f),
                reflectionClipEnabled(false),
                reflectionClipPlane(0.0f, 0.0f, 1.0f, 0.0f),
@@ -85,6 +81,7 @@ Game::Game() : time(0.0f),
                pillarDiffuseTextureLoaded(false),
                capturePillarMesh(nullptr),
                capturePillarModelMatrix(glm::mat4(1.0f)),
+               deflectorPillarModelMatrix(glm::mat4(1.0f)),
                capturePillarMetalTexture(0),
                capturePillarMetalTextureLoaded(false),
                shadowMapFBO(0),
@@ -126,18 +123,19 @@ Game::Game() : time(0.0f),
     capturePillarMesh = new Object(game_internal::objectPath("capture_pillar.obj").c_str());
     if (!capturePillarMesh->vertices.empty()) {
         capturePillarMesh->makeObject(*phongShader);
-        std::cout << "Maillage OBJ du pilier recepteur charge (" << capturePillarMesh->vertices.size()
+        std::cout << "Maillage OBJ des piliers mobiles charge (" << capturePillarMesh->vertices.size()
                   << " sommets).\n";
     } else {
         delete capturePillarMesh;
         capturePillarMesh = nullptr;
-        std::cout << "AVERTISSEMENT: capture_pillar.obj absent ou illisible — cube conserve pour le pilier central.\n";
+        std::cerr << "ERREUR: capture_pillar.obj absent ou illisible — piliers mobiles non rendus.\n";
     }
 
     // Rectangular pillars arranged as a full scene grid.
     const float pillarSpacing = 3.2f;
     const float pillarHalfWidth = 0.35f;
     const float pillarHeight = 5.8f;
+    scenePillarHeight = pillarHeight;
     const float pillarCenterY = groundTopY + (pillarHeight * 0.5f);
     const int gridRadius = 3;
     for (int gx = -gridRadius; gx <= gridRadius; ++gx) {
@@ -156,28 +154,19 @@ Game::Game() : time(0.0f),
                 glm::vec3(pillarHalfWidth * 2.0f, pillarHeight, pillarHalfWidth * 2.0f)
             );
             extraCubeModels.push_back(pillarModel);
-            pillarBaseCenters.push_back(glm::vec3(gx * pillarSpacing, groundTopY, gz * pillarSpacing));
         }
     }
 
     // Petit pilier "receptacle" au centre, hauteur egale a l'oeil de la camera
     // (= groundTopY + CAMERA_EYE_HEIGHT). Sert de socle pour aspirer la lampe.
-    // Il est mobile sur l'axe X grace au rail; on memorise son index pour
-    // pouvoir mettre a jour sa matrice de transformation chaque fois qu'il glisse.
+    // Il est mobile sur l'axe Z grace au rail.
     centerPillarBaseCenter = glm::vec3(0.0f, groundTopY, 0.0f);
-    centerPillarColliderIndex = static_cast<int>(extraCubeModels.size());
-    extraCubeModels.push_back(glm::mat4(1.0f));
-    centerPillarShadowIndex = static_cast<int>(pillarBaseCenters.size());
-    pillarBaseCenters.push_back(centerPillarBaseCenter);
 
-    // Canon horizontal accole a la face +X du petit pilier, au niveau du sommet.
-    // Sert de "bouche" d'ou part le rayon lumineux quand la lampe est ancree.
-    cannonDirection = glm::vec3(1.0f, 0.0f, 0.0f);
-    cannonColliderIndex = static_cast<int>(extraCubeModels.size());
-    extraCubeModels.push_back(glm::mat4(1.0f));
+    // Le rayon part de la source bleue au-dessus du pilier, vers +X.
+    beamDirection = glm::vec3(1.0f, 0.0f, 0.0f);
 
     // Rail au sol qui guide visuellement le deplacement du petit pilier.
-    // Il est aligne sur Z pour etre perpendiculaire a la direction du canon (qui sort sur +X).
+    // Il est aligne sur Z, perpendiculaire a la direction du rayon (+X).
     // Le rail n'a ni collider ni ombre: il est rendu separement dans renderSceneOpaque.
     const float railLength = 4.0f;
     const float railHalfWidthX = 0.08f;
@@ -188,23 +177,16 @@ Game::Game() : time(0.0f),
     railModel = glm::translate(railModel, glm::vec3(0.0f, groundTopY + railHalfHeightY, 0.0f));
     railModel = glm::scale(railModel, glm::vec3(railHalfWidthX * 2.0f, railHalfHeightY * 2.0f, railLength));
 
-    // Initialise la matrice du petit pilier et du canon a partir des parametres
-    // partages, et synchronise toutes les donnees derivees (muzzle, ombre, cible
-    // d'ancrage de la lampe).
+    // Initialise la matrice du pilier ; invalide la shadow map statique (§7.4 p. 235).
     rebuildCenterPillarTransform();
 
-    // 2eme pilier qui porte la pyramide deflectrice. Il est plus court que le pilier
-    // central pour que la pyramide (plus grosse) soit clairement visible "posee"
-    // dessus. Place sur la trajectoire balayee par le canon (+X), et lui-meme mobile
-    // sur un rail aligne sur X (perpendiculaire a la direction du rayon devie +Z).
+    // 2eme pilier identique au pilier emetteur, porte la pyramide deflectrice.
+    // Place sur la trajectoire balayee par le rayon (+X), mobile sur un rail
+    // aligne sur X (perpendiculaire au rayon devie +Z).
     const float kDeflectorPillarX = 5.5f;
     const float kDeflectorPillarZ = -1.5f;
     prismDeflectDirection = glm::vec3(0.0f, 0.0f, 1.0f);
     deflectorPillarBase = glm::vec3(kDeflectorPillarX, groundTopY, kDeflectorPillarZ);
-    deflectorPillarColliderIndex = static_cast<int>(extraCubeModels.size());
-    extraCubeModels.push_back(glm::mat4(1.0f));
-    deflectorPillarShadowIndex = static_cast<int>(pillarBaseCenters.size());
-    pillarBaseCenters.push_back(deflectorPillarBase);
 
     // Rail au sol qui guide le pilier deflecteur. Aligne sur X (perpendiculaire au
     // rayon devie). Comme pour le rail central, il est purement decoratif: pas de
@@ -231,6 +213,7 @@ Game::Game() : time(0.0f),
     const float mapHalfExtent = worldCollisionHalfExtent;
     const float wallThickness = 0.6f;
     const float ceilingThickness = 0.6f;
+    sceneCeilingThickness = ceilingThickness;
     const float wallHeight = pillarHeight;
     const float ceilingCenterY = groundTopY + pillarHeight - (ceilingThickness * 0.5f);
     const float wallCenterY = groundTopY + (wallHeight * 0.5f);
@@ -257,7 +240,6 @@ Game::Game() : time(0.0f),
             glm::vec3(pillarHalfWidth * 2.0f, pillarHeight, pillarHalfWidth * 2.0f)
         );
         extraCubeModels.push_back(pillarModel);
-        pillarBaseCenters.push_back(glm::vec3(x, groundTopY, z));
     };
 
     auto shouldSkipForEastTarget = [&](float z) {
@@ -302,9 +284,10 @@ Game::Game() : time(0.0f),
     southTargetWall = glm::scale(southTargetWall, glm::vec3(kTargetWallSpan, wallHeight, wallThickness));
     extraCubeModels.push_back(southTargetWall);
 
+    // Lampe juste sous la dalle : eclaire la face inferieure du plafond (normale -Y).
     ceilingLightPosition = glm::vec3(
         0.0f,
-        groundTopY + pillarHeight - ceilingThickness + 0.02f,
+        groundTopY + scenePillarHeight - sceneCeilingThickness - 0.12f,
         0.0f
     );
 
@@ -373,8 +356,9 @@ Game::Game() : time(0.0f),
         std::cout << "INFO: texture metal Metal055 pour le pilier recepteur introuvable." << std::endl;
     }
 
-    // Shadow map statique pour la lumiere du plafond (RTR4 §7.4 "Shadow Maps", p. 234).
-    // CLAMP_TO_BORDER + white border: out-of-frustum samples read as fully lit (§7.4).
+    // Shadow map statique pour la lumiere du plafond (RTR4 §7.4 p. 234-235, Williams 1978).
+    // Passe profondeur seule : GL_DRAW_BUFFER=GL_NONE (§7.4). CLAMP_TO_BORDER + bord blanc :
+    // texels hors frustum lus comme entierement eclaires (profondeur lointaine).
     glGenFramebuffers(1, &shadowMapFBO);
     glGenTextures(1, &shadowMapTexture);
     glBindTexture(GL_TEXTURE_2D, shadowMapTexture);
@@ -390,7 +374,7 @@ Game::Game() : time(0.0f),
     glReadBuffer(GL_NONE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Dynamic shadow map for the player-carried light (re-rendered every frame).
+    // Dynamic shadow map for the player-carried light (RTR4 §7.4 p. 234, recalculee chaque frame).
     glGenTextures(1, &dynamicShadowMapTexture);
     glBindTexture(GL_TEXTURE_2D, dynamicShadowMapTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, game_internal::kShadowMapSize, game_internal::kShadowMapSize, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);

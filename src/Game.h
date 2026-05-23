@@ -11,6 +11,8 @@
 
 class Game {
 public:
+    static constexpr float kLightSourceOffsetY = 0.18f;
+
     Game();
     ~Game();
 
@@ -46,18 +48,13 @@ private:
     std::vector<Light*> lights;
     std::vector<ExplosionParticle> explosionParticles;
     std::vector<glm::mat4> extraCubeModels;
-    std::vector<glm::vec3> pillarBaseCenters;
     std::vector<SceneCollider> sceneColliders;
     glm::vec3 centerPillarBaseCenter;
     float centerPillarHeight;
     float centerPillarHalfWidth;
-    glm::vec3 cannonMuzzlePos;
-    glm::vec3 cannonDirection;
-    float cannonLength;
-    float cannonHalfWidth;
-    int cannonColliderIndex;
+    glm::vec3 beamSourcePos;
+    glm::vec3 beamDirection;
     int centerPillarColliderIndex;
-    int centerPillarShadowIndex;
     float centerPillarOffsetZ;
     float centerPillarRailMin;
     float centerPillarRailMax;
@@ -78,11 +75,9 @@ private:
     float prismRadius;
     glm::vec3 prismDeflectDirection;
     int deflectorPillarColliderIndex;
-    int deflectorPillarShadowIndex;
     float deflectorPillarOffsetX;
     float deflectorRailMin;
     float deflectorRailMax;
-    float deflectorPillarHeight;
     glm::mat4 deflectorRailModel;
     glm::vec3 deflectorPillarBase;
     glm::vec3 target2Position;
@@ -101,6 +96,7 @@ private:
     Object* groundObject;
     Object* capturePillarMesh;
     glm::mat4 capturePillarModelMatrix;
+    glm::mat4 deflectorPillarModelMatrix;
     GLuint capturePillarMetalTexture;
     bool capturePillarMetalTextureLoaded;
     GLuint skyboxVAO;
@@ -115,8 +111,7 @@ private:
     GLuint shadowMapFBO;
     GLuint shadowMapTexture;
     glm::mat4 lightSpaceMatrix;
-    // La lumiere du plafond et ses occluders (piliers, murs, plafond) sont statiques :
-    // la shadow map n'est calculee qu'une fois au demarrage (RTR4 §7.4 p. 235).
+    // Occludeurs statiques du plafond : shadow map regeneree quand un pilier bouge (§7.4 p. 235).
     bool staticShadowMapsBuilt;
     GLuint dynamicShadowMapTexture;
     glm::mat4 dynamicLightSpaceMatrix;
@@ -141,6 +136,8 @@ private:
     glm::vec3 lightAnchorTargetPos;
     float worldCollisionHalfExtent;
     float groundTopY;
+    float scenePillarHeight;
+    float sceneCeilingThickness;
     float ceilingLightStrength;
     float ceilingLightRange;
     glm::vec3 ceilingLightColor;
@@ -188,6 +185,9 @@ private:
         const glm::vec3& cameraPosition
     );
     void rebuildDeflectorPillarTransform();
+    void drawMovablePillarPhong(const glm::mat4& pillarModelMatrix);
+    void drawMovablePillarShadows();
+    void renderPlanarShadows(const glm::mat4& view, const glm::mat4& projection);
     bool raySphereIntersect(
         const glm::vec3& origin,
         const glm::vec3& direction,
