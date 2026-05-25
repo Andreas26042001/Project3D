@@ -628,50 +628,7 @@ void Game::setupDeflectorPrism() {
         game_internal::shaderPath("prism.frag").c_str()
     );
 
-    // Regular octahedron (6 vertices at axis extremes, 8 triangular faces).
-    const float r = prismRadius;
-    const glm::vec3 v[6] = {
-        glm::vec3(+r, 0.0f, 0.0f),
-        glm::vec3(-r, 0.0f, 0.0f),
-        glm::vec3(0.0f, +r, 0.0f),
-        glm::vec3(0.0f, -r, 0.0f),
-        glm::vec3(0.0f, 0.0f, +r),
-        glm::vec3(0.0f, 0.0f, -r)
-    };
-    const int faces[8][3] = {
-        {0, 2, 4}, {0, 4, 3}, {0, 3, 5}, {0, 5, 2},
-        {1, 4, 2}, {1, 3, 4}, {1, 5, 3}, {1, 2, 5}
-    };
-
-    std::vector<float> data;
-    data.reserve(8 * 3 * 6);
-    for (int f = 0; f < 8; ++f) {
-        const glm::vec3 p0 = v[faces[f][0]];
-        const glm::vec3 p1 = v[faces[f][1]];
-        const glm::vec3 p2 = v[faces[f][2]];
-        const glm::vec3 faceNormal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
-        for (int k = 0; k < 3; ++k) {
-            const glm::vec3& position = v[faces[f][k]];
-            data.push_back(position.x);
-            data.push_back(position.y);
-            data.push_back(position.z);
-            data.push_back(faceNormal.x);
-            data.push_back(faceNormal.y);
-            data.push_back(faceNormal.z);
-        }
-    }
-    prismVertexCount = static_cast<int>(data.size() / 6);
-
-    glGenVertexArrays(1, &prismVAO);
-    glGenBuffers(1, &prismVBO);
-    glBindVertexArray(prismVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, prismVBO);
-    glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(float), data.data(), GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
-    glBindVertexArray(0);
+    prismRenderer.InitGeometry(prismRadius);
 }
 
 void Game::renderDeflectorPrism(
@@ -679,35 +636,16 @@ void Game::renderDeflectorPrism(
     const glm::mat4& projection,
     const glm::vec3& cameraPosition
 ) {
-    if (prismVAO == 0 || prismShader == nullptr || prismVertexCount <= 0) {
+    if (!prismShader) {
         return;
     }
 
-    glm::mat4 model = glm::mat4(1.0f);
-    model = glm::translate(model, prismCenter);
-
-    prismShader->use();
-    prismShader->setMat4("view", view);
-    prismShader->setMat4("projection", projection);
-    prismShader->setMat4("model", model);
-    prismShader->setVec3("u_view_pos", cameraPosition);
-    prismShader->setFloat("refractionIndice", 1.52f);
-    glActiveTexture(GL_TEXTURE6);
-    skybox.getCubemapTexture().bind(6);
-    prismShader->setInt("cubemapSampler", 6);
-
-    // Like LAB03 ex10: depth test on + depth write (no depth mask off).
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-    glDepthMask(GL_TRUE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    glBindVertexArray(prismVAO);
-    glDrawArrays(GL_TRIANGLES, 0, prismVertexCount);
-    glBindVertexArray(0);
-
-    glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-    glDisable(GL_BLEND);
+    prismRenderer.Render(
+        *prismShader,
+        skybox.getCubemapTexture(),
+        view,
+        projection,
+        cameraPosition,
+        prismCenter
+    );
 }

@@ -245,11 +245,5 @@ Game::~Game() {
 
     beamRenderer.Destroy();
 
-    if (prismVAO != 0) {
-        glDeleteVertexArrays(1, &prismVAO);
-    }
-
-    if (prismVBO != 0) {
-        glDeleteBuffers(1, &prismVBO);
-    }
+    prismRenderer.Destroy();
 }

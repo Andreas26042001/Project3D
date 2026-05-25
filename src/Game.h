@@ -14,6 +14,7 @@
 #include "PuzzleSystem.h"
 #include "CrosshairRenderer.h"
 #include "BeamRenderer.h"
+#include "PrismRenderer.h"
 
 class Player;
 
@@ -75,10 +76,7 @@ private:
     glm::mat4 target1ModelMatrix;
 
     // Deflector prism + pillar
-    
-    GLuint prismVAO = 0;
-    GLuint prismVBO = 0;
-    int prismVertexCount = 0;
+    PrismRenderer prismRenderer;
     std::unique_ptr<Shader> prismShader;
     glm::vec3 prismCenter;
     float prismRadius = 0.33f;

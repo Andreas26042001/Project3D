@@ -66,6 +66,7 @@ set(SOURCES_COMMON
     src/PuzzleSystem.cpp
     src/CrosshairRenderer.cpp
     src/BeamRenderer.cpp
+    src/PrismRenderer.cpp
 )
 
 set(SOURCES_main
