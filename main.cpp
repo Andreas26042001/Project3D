@@ -5,7 +5,7 @@
 #include <glm/glm.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "import/stb/stb_image.h"
+#include "3rdParty/stb/stb_image.h"
 
 #include "src/Game.h"
 #include "src/Player.h"

@@ -19,8 +19,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
 find_package(OpenGL REQUIRED)
 
 #for glad library
-add_library( glad STATIC import/glad/src/glad.c)
-set(GLAD_INCLUDE "import/glad/include")
+add_library( glad STATIC 3rdParty/glad/src/glad.c)
+set(GLAD_INCLUDE "3rdParty/glad/include")
 target_include_directories(glad PUBLIC ${GLAD_INCLUDE})
 
 #for GLFW
@@ -32,14 +32,14 @@ option(GLFW_BUILD_TESTS OFF)
 find_package(glfw3 QUIET)
 if (NOT glfw3_FOUND)
     #if glfw is not found, we will use the sources from the submodules
-    add_subdirectory(import/glfw)
-    include_directories(import/glfw/include/)
+    add_subdirectory(3rdParty/glfw)
+    include_directories(3rdParty/glfw/include/)
 endif()
 
 
-include_directories(import/glad/include/
-                    import/glm/
-                    import/stb/)
+include_directories(3rdParty/glad/include/
+                    3rdParty/glm/
+                    3rdParty/stb/)
 
 
 add_compile_definitions(PATH_TO_OBJECTS="${CMAKE_CURRENT_SOURCE_DIR}/assets/objects")
@@ -72,7 +72,7 @@ set(SOURCES_main
 
 if (NOT glfw3_FOUND)
     add_executable(${PROJECT_NAME} ${SOURCES_main})
-    target_include_directories(${PROJECT_NAME} PUBLIC ${GLAD_INCLUDE} import/glfw/include/ src)
+    target_include_directories(${PROJECT_NAME} PUBLIC ${GLAD_INCLUDE} 3rdParty/glfw/include/ src)
     target_link_libraries(${PROJECT_NAME} PUBLIC OpenGL::GL glfw glad)
 
 else()
