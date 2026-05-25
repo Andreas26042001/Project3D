@@ -217,7 +217,7 @@ void Game::renderPlanarShadows(const glm::mat4& view, const glm::mat4& projectio
     }
 }
 
-Game::BeamTrace Game::traceAnchoredBeam(float maxDistance) const {
+BeamTrace Game::traceAnchoredBeam(float maxDistance) const {
     BeamTrace result;
     const glm::vec3 beamOrigin = lightProjectile.position;
 
@@ -679,53 +679,19 @@ void Game::setupBeamTarget() {
 }
 
 void Game::updateBeamTarget(float deltaTime) {
-    const bool beamCurrentlyActive = lightProjectile.anchoredOnPillar && !lightProjectile.anchorAnimating;
-    bool target1Hit = false;
-    bool target2Hit = false;
+    const BeamTrace beam = traceAnchoredBeam(60.0f);
 
-    if (beamCurrentlyActive) {
-        const float kMax = 60.0f;
-        const BeamTrace beam = traceAnchoredBeam(kMax);
-        const float beamLen = beam.lengths[0];
-
-        if (beam.segmentCount >= 2) {
-            const float deflectedBeamLen = beam.lengths[1];
-            const glm::vec3 toTarget2 = target2Position - prismCenter;
-            const float t2 = glm::dot(toTarget2, prismDeflectDirection);
-            if (t2 >= 0.0f && t2 <= deflectedBeamLen + 0.05f) {
-                const glm::vec3 closest = prismCenter + prismDeflectDirection * t2;
-                if (glm::length(target2Position - closest) < targetHitTolerance) {
-                    target2Hit = true;
-                }
-            }
-        }
-
-        const glm::vec3 toTarget = targetPosition - lightProjectile.position;
-        const float t = glm::dot(toTarget, beamDirection);
-        if (t >= 0.0f && t <= beamLen + 0.05f) {
-            const glm::vec3 closest = lightProjectile.position + beamDirection * t;
-            if (glm::length(targetPosition - closest) < targetHitTolerance) {
-                target1Hit = true;
-            }
-        }
-    }
-
-    auto updateActivation = [&](bool isHit, float& timer, bool& activated) {
-        if (isHit) {
-            if (!activated) {
-                timer += deltaTime;
-                if (timer >= targetActivationDuration) {
-                    activated = true;
-                }
-            }
-        } else {
-            activated = false;
-            timer = 0.0f;
-        }
-    };
-
-    updateActivation(target1Hit, targetActivationTimer, targetActivated);
-    updateActivation(target2Hit, target2ActivationTimer, target2Activated);
+    puzzleSystem.Update(
+        deltaTime,
+        lightProjectile,
+        beam,
+        targetPosition,
+        target2Position,
+        prismCenter,
+        prismDeflectDirection,
+        beamDirection,
+        targetHitTolerance
+    );
 }
 
 void Game::renderBeamTarget(const glm::mat4& view, const glm::mat4& projection) {
@@ -746,12 +712,12 @@ void Game::renderBeamTarget(const glm::mat4& view, const glm::mat4& projection) 
     glBindVertexArray(targetVAO);
 
     // Target 1 (east wall, main beam).
-    lampShader->setVec3("lightColor", targetActivated ? colorActive : colorIdle);
+    lampShader->setVec3("lightColor", puzzleSystem.targetActivated ? colorActive : colorIdle);
     lampShader->setMat4("model", target1ModelMatrix);
     glDrawArrays(GL_TRIANGLES, 0, targetVertexCount);
 
     // Target 2 (south wall, deflected beam).
-    lampShader->setVec3("lightColor", target2Activated ? colorActive : colorIdle);
+    lampShader->setVec3("lightColor", puzzleSystem.target2Activated ? colorActive : colorIdle);
     lampShader->setMat4("model", target2ModelMatrix);
     glDrawArrays(GL_TRIANGLES, 0, targetVertexCount);
 

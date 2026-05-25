@@ -11,6 +11,7 @@
 #include "ShadowMap.h"
 #include "Texture.h"
 #include "LightProjectileSystem.h"
+#include "PuzzleSystem.h"
 
 class Player;
 
@@ -57,18 +58,19 @@ private:
     float sceneCeilingThickness = 0.6f;
 
     // Beam targets
+    PuzzleSystem puzzleSystem;
     GLuint targetVAO = 0;
     GLuint targetVBO = 0;
     int targetVertexCount = 0;
     glm::vec3 targetPosition;
     float targetHitTolerance = 0.18f;
-    float targetActivationTimer = 0.0f;
-    float targetActivationDuration = 3.0f;
-    bool targetActivated = false;
+    
+    
+    
     glm::vec3 target2Position;
     glm::mat4 target2ModelMatrix;
-    float target2ActivationTimer = 0.0f;
-    bool target2Activated = false;
+    
+    
     glm::mat4 target1ModelMatrix;
 
     // Deflector prism + pillar
@@ -117,12 +119,6 @@ private:
     int viewportHeight = 600;
     bool crosshairVisible = true;
 
-    struct BeamTrace {
-        int segmentCount = 0;
-        glm::vec3 starts[2];
-        glm::vec3 ends[2];
-        float lengths[2] = {0.0f, 0.0f};
-    };
 
     BeamTrace traceAnchoredBeam(float maxDistance) const;
 

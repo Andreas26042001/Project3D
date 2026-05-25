@@ -63,6 +63,7 @@ set(SOURCES_COMMON
     src/camera.cpp
     src/object.cpp
     src/LightProjectileSystem.cpp
+    src/PuzzleSystem.cpp
 )
 
 set(SOURCES_main
