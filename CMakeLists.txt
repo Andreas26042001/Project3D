@@ -62,6 +62,7 @@ set(SOURCES_COMMON
     src/shader.cpp
     src/camera.cpp
     src/object.cpp
+    src/LightProjectileSystem.cpp
 )
 
 set(SOURCES_main

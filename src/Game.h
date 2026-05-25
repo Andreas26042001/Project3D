@@ -10,6 +10,7 @@
 #include "ParticleSystem.h"
 #include "ShadowMap.h"
 #include "Texture.h"
+#include "LightProjectileSystem.h"
 
 class Player;
 
@@ -109,19 +110,7 @@ private:
     float ceilingLightStrength = 2.4f;
     float ceilingLightRange = 8.0f;
     glm::vec3 ceilingLightColor{1.0f, 0.88f, 0.38f};
-    glm::vec3 lightPosition{0.0f};
-    bool lightProjectileActive = false;
-    glm::vec3 lightProjectileDirection{0.0f, 0.0f, -1.0f};
-    float lightProjectileLifetime = 0.0f;
-    float lightProjectileSpeed = 9.0f;
-    float lightProjectileMaxLifetime = 1.8f;
-    float lightProjectileMaxDistance = 14.0f;
-    bool lightAnchoredOnPillar = false;
-    bool lightAnchorAnimating = false;
-    float lightAnchorAnimT = 0.0f;
-    float lightAnchorAnimDuration = 0.45f;
-    glm::vec3 lightAnchorSourcePos;
-    glm::vec3 lightAnchorTargetPos;
+    LightProjectileSystem lightProjectile;
 
     // Viewport / HUD
     int viewportWidth = 800;

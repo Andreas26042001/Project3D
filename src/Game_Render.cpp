@@ -219,7 +219,7 @@ void Game::renderPlanarShadows(const glm::mat4& view, const glm::mat4& projectio
 
 Game::BeamTrace Game::traceAnchoredBeam(float maxDistance) const {
     BeamTrace result;
-    const glm::vec3 beamOrigin = lightPosition;
+    const glm::vec3 beamOrigin = lightProjectile.position;
 
     glm::vec3 hit(0.0f);
     float dist = 0.0f;
@@ -272,12 +272,12 @@ void Game::renderShadowMap() {
         return;
     }
 
-    const bool dynamicActive = lightProjectileActive || lightAnchoredOnPillar;
+    const bool dynamicActive = lightProjectile.active || lightProjectile.anchoredOnPillar;
     ShadowMap::RenderParams params;
     params.dynamicActive = dynamicActive;
     if (dynamicActive) {
-        params.lightPosition = lightPosition;
-        params.lightDirection = lightProjectileDirection;
+        params.lightPosition = lightProjectile.position;
+        params.lightDirection = lightProjectile.direction;
     }
 
     shadowMap.render(params, shadowDepthShader.get(), [this](Shader* depthShader, bool ceilingCastersOnly) {
@@ -337,15 +337,15 @@ void Game::renderSceneOpaque(
         glDisable(static_cast<GLenum>(GL_CLIP_DISTANCE1 + i));
     }
 
-    const bool dynamicLightActive = lightProjectileActive || lightAnchoredOnPillar;
-    const bool beamActive = lightAnchoredOnPillar && !lightAnchorAnimating;
+    const bool dynamicLightActive = lightProjectile.active || lightProjectile.anchoredOnPillar;
+    const bool beamActive = lightProjectile.anchoredOnPillar && !lightProjectile.anchorAnimating;
     const glm::vec3 projectileBlue(0.10f, 0.28f, 1.00f);
-    const glm::vec3 dynamicLightColor = lightProjectileActive
+    const glm::vec3 dynamicLightColor = lightProjectile.active
         ? projectileBlue
         : glm::vec3(0.30f, 0.60f, 1.00f);
-    const float dynamicLightStrength = lightProjectileActive
+    const float dynamicLightStrength = lightProjectile.active
         ? 4.8f
-        : (lightAnchoredOnPillar ? 1.0f : 1.6f);
+        : (lightProjectile.anchoredOnPillar ? 1.0f : 1.6f);
     const glm::vec3 beamColor(0.30f, 0.60f, 1.00f);
     const float kBeamStrength = beamActive ? 1.0f : 1.8f;
     const float kMaxBeamDistance = 40.0f;
@@ -375,7 +375,7 @@ void Game::renderSceneOpaque(
         phongShader->setFloat("ceilingAttQuadratic", 2.0f / (rangeFactor * rangeFactor));
         phongShader->setInt("dynamicLightActive", dynamicLightActive ? 1 : 0);
         if (dynamicLightActive) {
-            phongShader->setVec3("dynamicLightPos", lightPosition);
+            phongShader->setVec3("dynamicLightPos", lightProjectile.position);
         }
         phongShader->setVec3("dynamicLightColor", dynamicLightColor);
         phongShader->setFloat("dynamicLightStrength", dynamicLightActive ? dynamicLightStrength : 0.0f);
@@ -474,14 +474,14 @@ void Game::renderSceneOpaque(
         lampShader->setMat4("view", view);
         lampShader->setMat4("projection", projection);
         disableLampEdgeClip(lampShader.get());
-        const glm::vec3 lampColor = lightProjectileActive
+        const glm::vec3 lampColor = lightProjectile.active
             ? glm::vec3(0.06f, 0.18f, 2.0f)
             : dynamicLightColor;
-        const float lampScale = lightProjectileActive ? 0.22f : 0.12f;
+        const float lampScale = lightProjectile.active ? 0.22f : 0.12f;
         lampShader->setVec3("lightColor", lampColor);
 
         glm::mat4 lightModel = glm::mat4(1.0f);
-        lightModel = glm::translate(lightModel, lightPosition);
+        lightModel = glm::translate(lightModel, lightProjectile.position);
         lightModel = glm::scale(lightModel, glm::vec3(lampScale));
         lampShader->setMat4("model", lightModel);
         lightMarker->draw();
@@ -679,7 +679,7 @@ void Game::setupBeamTarget() {
 }
 
 void Game::updateBeamTarget(float deltaTime) {
-    const bool beamCurrentlyActive = lightAnchoredOnPillar && !lightAnchorAnimating;
+    const bool beamCurrentlyActive = lightProjectile.anchoredOnPillar && !lightProjectile.anchorAnimating;
     bool target1Hit = false;
     bool target2Hit = false;
 
@@ -700,10 +700,10 @@ void Game::updateBeamTarget(float deltaTime) {
             }
         }
 
-        const glm::vec3 toTarget = targetPosition - lightPosition;
+        const glm::vec3 toTarget = targetPosition - lightProjectile.position;
         const float t = glm::dot(toTarget, beamDirection);
         if (t >= 0.0f && t <= beamLen + 0.05f) {
-            const glm::vec3 closest = lightPosition + beamDirection * t;
+            const glm::vec3 closest = lightProjectile.position + beamDirection * t;
             if (glm::length(targetPosition - closest) < targetHitTolerance) {
                 target1Hit = true;
             }
