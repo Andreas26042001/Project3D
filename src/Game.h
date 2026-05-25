@@ -13,6 +13,7 @@
 #include "LightProjectileSystem.h"
 #include "PuzzleSystem.h"
 #include "CrosshairRenderer.h"
+#include "BeamRenderer.h"
 
 class Player;
 
@@ -59,10 +60,9 @@ private:
     float sceneCeilingThickness = 0.6f;
 
     // Beam targets
+    BeamRenderer beamRenderer;
     PuzzleSystem puzzleSystem;
-    GLuint targetVAO = 0;
-    GLuint targetVBO = 0;
-    int targetVertexCount = 0;
+    
     glm::vec3 targetPosition;
     float targetHitTolerance = 0.18f;
     
@@ -75,6 +75,7 @@ private:
     glm::mat4 target1ModelMatrix;
 
     // Deflector prism + pillar
+    
     GLuint prismVAO = 0;
     GLuint prismVBO = 0;
     int prismVertexCount = 0;

@@ -65,6 +65,7 @@ set(SOURCES_COMMON
     src/LightProjectileSystem.cpp
     src/PuzzleSystem.cpp
     src/CrosshairRenderer.cpp
+    src/BeamRenderer.cpp
 )
 
 set(SOURCES_main

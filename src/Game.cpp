@@ -243,13 +243,7 @@ void Game::initRenderingResources() {
 Game::~Game() {
     crosshairRenderer.Destroy();
 
-    if (targetVAO != 0) {
-        glDeleteVertexArrays(1, &targetVAO);
-    }
-
-    if (targetVBO != 0) {
-        glDeleteBuffers(1, &targetVBO);
-    }
+    beamRenderer.Destroy();
 
     if (prismVAO != 0) {
         glDeleteVertexArrays(1, &prismVAO);
