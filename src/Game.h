@@ -141,7 +141,6 @@ private:
         const glm::vec3& playerWorldPosition
     );
     void renderShadowMap();
-    void disableLightProjectile();
     void rebuildSceneColliders();
     bool isSegmentCollidingWithScene(const glm::vec3& start, const glm::vec3& end, float radius) const;
     bool raycastScene(

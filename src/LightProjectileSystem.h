@@ -1,10 +1,17 @@
 #ifndef LIGHT_PROJECTILE_SYSTEM_H
 #define LIGHT_PROJECTILE_SYSTEM_H
 
+#include <functional>
 #include <glm/glm.hpp>
 
 class LightProjectileSystem {
 public:
+    enum class UpdateResult {
+        None,
+        Disabled,
+        Captured
+    };
+
     bool active = false;
     bool anchoredOnPillar = false;
     bool anchorAnimating = false;
@@ -25,6 +32,16 @@ public:
     bool CanFire() const;
     void Fire(const glm::vec3& origin, const glm::vec3& dir);
     void Disable();
+
+    UpdateResult Update(
+        float deltaTime,
+        float worldCollisionHalfExtent,
+        const glm::vec3& centerPillarBaseCenter,
+        float centerPillarHeight,
+        float lightSourceOffsetY,
+        const glm::vec3& beamDirection,
+        const std::function<bool(const glm::vec3&, const glm::vec3&, float)>& segmentCollision
+    );
 };
 
 #endif

@@ -128,62 +128,23 @@ void Game::Update(float deltaTime) {
     rebuildSceneColliders();
     updateBeamTarget(deltaTime);
 
-    if (lightProjectile.active) {
-        lightProjectile.lifetime += deltaTime;
-        float travelled = lightProjectile.lifetime * lightProjectile.speed;
-        if (lightProjectile.lifetime >= lightProjectile.maxLifetime || travelled >= lightProjectile.maxDistance) {
-            disableLightProjectile();
-            return;
+    auto result = lightProjectile.Update(
+        deltaTime,
+        worldCollisionHalfExtent,
+        centerPillarBaseCenter,
+        centerPillarHeight,
+        kLightSourceOffsetY,
+        beamDirection,
+        [this](const glm::vec3& from, const glm::vec3& to, float radius) {
+            return isSegmentCollidingWithScene(from, to, radius);
         }
+    );
 
-        const glm::vec3 currentPosition = lightProjectile.position;
-        const glm::vec3 targetPosition = currentPosition + lightProjectile.direction * (lightProjectile.speed * deltaTime);
-        const glm::vec3 nextPosition = targetPosition;
-
-        // Map collision: remove projectile when leaving the playable box.
-        if (nextPosition.x < -worldCollisionHalfExtent || nextPosition.x > worldCollisionHalfExtent ||
-            nextPosition.y < -worldCollisionHalfExtent || nextPosition.y > worldCollisionHalfExtent ||
-            nextPosition.z < -worldCollisionHalfExtent || nextPosition.z > worldCollisionHalfExtent) {
-            disableLightProjectile();
-            return;
-        }
-
-        const float projectileRadius = 0.06f;
-        if (isSegmentCollidingWithScene(currentPosition, nextPosition, projectileRadius)) {
-            disableLightProjectile();
-            return;
-        }
-
-        const glm::vec3 pillarTop = centerPillarBaseCenter + glm::vec3(0.0f, centerPillarHeight, 0.0f);
-        const float kCaptureRadius = 1.0f;
-        if (glm::length(nextPosition - pillarTop) < kCaptureRadius) {
-            lightProjectile.active = false;
-            lightProjectile.lifetime = 0.0f;
-            lightProjectile.anchoredOnPillar = true;
-            lightProjectile.anchorAnimating = true;
-            lightProjectile.anchorAnimT = 0.0f;
-            lightProjectile.anchorSourcePos = nextPosition;
-            lightProjectile.anchorTargetPos = pillarTop + glm::vec3(0.0f, kLightSourceOffsetY, 0.0f);
-            lightProjectile.position = nextPosition;
-            lightProjectile.direction = beamDirection;
-            return;
-        }
-
-        lightProjectile.position = nextPosition;
-    } else if (lightProjectile.anchoredOnPillar) {
-        if (lightProjectile.anchorAnimating) {
-            lightProjectile.anchorAnimT += deltaTime / std::max(0.0001f, lightProjectile.anchorAnimDuration);
-            if (lightProjectile.anchorAnimT >= 1.0f) {
-                lightProjectile.anchorAnimT = 1.0f;
-                lightProjectile.anchorAnimating = false;
-            }
-            const float t = lightProjectile.anchorAnimT * lightProjectile.anchorAnimT * (3.0f - 2.0f * lightProjectile.anchorAnimT);
-            lightProjectile.position = glm::mix(lightProjectile.anchorSourcePos, lightProjectile.anchorTargetPos, t);
-        } else {
-            lightProjectile.position = lightProjectile.anchorTargetPos;
-        }
+    if (result == LightProjectileSystem::UpdateResult::Disabled) {
+        explosionParticles.spawnExplosion(lightProjectile.position);
     }
 }
+
 bool Game::raycastScene(
     const glm::vec3& origin,
     const glm::vec3& direction,
@@ -211,13 +172,6 @@ void Game::FireLightProjectile(const glm::vec3& origin, const glm::vec3& directi
     lightProjectile.Fire(origin, direction);
 }
 
-void Game::disableLightProjectile() {
-    if (lightProjectile.active) {
-        explosionParticles.spawnExplosion(lightProjectile.position);
-    }
-
-    lightProjectile.Disable();
-}
 
 void Game::syncCarriedLight(const glm::vec3& cameraPosition, const glm::vec3& cameraForward) {
     if (lightProjectile.active || lightProjectile.anchoredOnPillar) {
