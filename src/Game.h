@@ -12,6 +12,7 @@
 #include "Texture.h"
 #include "LightProjectileSystem.h"
 #include "PuzzleSystem.h"
+#include "CrosshairRenderer.h"
 
 class Player;
 
@@ -104,8 +105,6 @@ private:
     std::unique_ptr<Object> groundObject;
     Texture groundDiffuseTexture;
     Texture pillarDiffuseTexture;
-    GLuint crosshairVAO = 0;
-    GLuint crosshairVBO = 0;
 
     // Lighting
     glm::vec3 ceilingLightPosition;
@@ -117,7 +116,7 @@ private:
     // Viewport / HUD
     int viewportWidth = 800;
     int viewportHeight = 600;
-    bool crosshairVisible = true;
+    CrosshairRenderer crosshairRenderer;
 
 
     BeamTrace traceAnchoredBeam(float maxDistance) const;
@@ -128,7 +127,7 @@ private:
     void initTextures();
     void initRenderingResources();
 
-    void setupCrosshair();
+    
     void renderCrosshair();
     void renderSceneOpaque(
         const glm::mat4& view,

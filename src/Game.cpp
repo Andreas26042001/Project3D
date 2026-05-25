@@ -234,15 +234,14 @@ void Game::initTextures() {
 void Game::initRenderingResources() {
     shadowMap.init(game_internal::kShadowMapSize);
     skybox.init(cubemapShader.get());
-    setupCrosshair();
+    crosshairRenderer.Init();
     explosionParticles.init(particleShader.get());
     setupBeamTarget();
     setupDeflectorPrism();
 }
 
 Game::~Game() {
-    glDeleteVertexArrays(1, &crosshairVAO);
-    glDeleteBuffers(1, &crosshairVBO);
+    crosshairRenderer.Destroy();
 
     if (targetVAO != 0) {
         glDeleteVertexArrays(1, &targetVAO);
