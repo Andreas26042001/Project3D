@@ -5,6 +5,8 @@
 #include <glm/glm.hpp>
 
 #include "shader.h"
+#include "object.h"
+#include "PuzzleSystem.h"
 
 class BeamRenderer {
 public:
@@ -18,12 +20,23 @@ public:
         bool target1Activated,
         bool target2Activated
     );
+    void RenderBeam(
+        Shader& shader,
+        Object& beamMesh,
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const BeamTrace& beam,
+        const glm::vec3& beamColor
+    );
+
     void Destroy();
 
 private:
     GLuint targetVAO = 0;
     GLuint targetVBO = 0;
     int targetVertexCount = 0;
+
 };
+
 
 #endif

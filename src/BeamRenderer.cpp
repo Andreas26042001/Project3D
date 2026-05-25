@@ -1,5 +1,6 @@
 #include "BeamRenderer.h"
-
+#include <cstdlib>
+#include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <vector>
 
@@ -118,4 +119,52 @@ void BeamRenderer::Destroy() {
     }
 
     targetVertexCount = 0;
+}
+
+void BeamRenderer::RenderBeam(
+    Shader& shader,
+    Object& beamMesh,
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const BeamTrace& beam,
+    const glm::vec3& beamColor
+) {
+    if (beam.segmentCount <= 0) {
+        return;
+    }
+
+    const float kBeamHalfWidth = 0.035f;
+
+    shader.use();
+    shader.setMat4("view", view);
+    shader.setMat4("projection", projection);
+    shader.setVec3("lightColor", beamColor);
+
+    for (int i = 0; i < beam.segmentCount; ++i) {
+        if (beam.lengths[i] <= 0.001f) {
+            continue;
+        }
+
+        const glm::vec3 beamCenter = (beam.starts[i] + beam.ends[i]) * 0.5f;
+        const glm::vec3 dir = beam.ends[i] - beam.starts[i];
+
+        const float lenX = std::abs(dir.x) > 0.0001f
+            ? std::abs(dir.x)
+            : kBeamHalfWidth * 2.0f;
+
+        const float lenY = std::abs(dir.y) > 0.0001f
+            ? std::abs(dir.y)
+            : kBeamHalfWidth * 2.0f;
+
+        const float lenZ = std::abs(dir.z) > 0.0001f
+            ? std::abs(dir.z)
+            : kBeamHalfWidth * 2.0f;
+
+        glm::mat4 beamModel = glm::mat4(1.0f);
+        beamModel = glm::translate(beamModel, beamCenter);
+        beamModel = glm::scale(beamModel, glm::vec3(lenX, lenY, lenZ));
+
+        shader.setMat4("model", beamModel);
+        beamMesh.draw();
+    }
 }

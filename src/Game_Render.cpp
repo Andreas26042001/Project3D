@@ -510,28 +510,25 @@ void Game::renderSceneOpaque(
     renderBeamTarget(view, projection);
 
     if (beamCount > 0) {
-        const float kBeamHalfWidth = 0.035f;
-        lampShader->use();
-        lampShader->setMat4("view", view);
-        lampShader->setMat4("projection", projection);
         disableLampEdgeClip(lampShader.get());
-        lampShader->setVec3("lightColor", beamColor);
+
+        BeamTrace beam;
+        beam.segmentCount = beamCount;
 
         for (int i = 0; i < beamCount; ++i) {
-            if (beamLengths[i] <= 0.001f) {
-                continue;
-            }
-            const glm::vec3 beamCenter = (beamStarts[i] + beamEnds[i]) * 0.5f;
-            const glm::vec3 dir = beamEnds[i] - beamStarts[i];
-            const float lenX = std::abs(dir.x) > 0.0001f ? std::abs(dir.x) : kBeamHalfWidth * 2.0f;
-            const float lenY = std::abs(dir.y) > 0.0001f ? std::abs(dir.y) : kBeamHalfWidth * 2.0f;
-            const float lenZ = std::abs(dir.z) > 0.0001f ? std::abs(dir.z) : kBeamHalfWidth * 2.0f;
-            glm::mat4 beamModel = glm::mat4(1.0f);
-            beamModel = glm::translate(beamModel, beamCenter);
-            beamModel = glm::scale(beamModel, glm::vec3(lenX, lenY, lenZ));
-            lampShader->setMat4("model", beamModel);
-            lightMarker->draw();
+            beam.starts[i] = beamStarts[i];
+            beam.ends[i] = beamEnds[i];
+            beam.lengths[i] = beamLengths[i];
         }
+
+        beamRenderer.RenderBeam(
+            *lampShader,
+            *lightMarker,
+            view,
+            projection,
+            beam,
+            beamColor
+        );
     }
 
     // Yellow ceiling light marker.
