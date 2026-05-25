@@ -30,8 +30,3 @@ SpacePuzzle
 *.log
 *.pdf
 
-# Local lab exercises (not versioned)
-LAB01/
-LAB02/
-LAB03/
-LAB04/
