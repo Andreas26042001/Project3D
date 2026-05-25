@@ -135,6 +135,12 @@ private:
 
     BeamTrace traceAnchoredBeam(float maxDistance) const;
 
+    void initShaders();
+    void loadMeshes();
+    void buildSceneLayout();
+    void initTextures();
+    void initRenderingResources();
+
     void setupCrosshair();
     void renderCrosshair();
     void renderSceneOpaque(

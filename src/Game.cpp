@@ -8,7 +8,18 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 Game::Game() {
-    // Initialize shaders
+    initShaders();
+    loadMeshes();
+    buildSceneLayout();
+    initTextures();
+    initRenderingResources();
+
+    // Enable depth testing
+    glEnable(GL_DEPTH_TEST);
+    rebuildSceneColliders();
+}
+
+void Game::initShaders() {
     phongShader = new Shader(game_internal::shaderPath("phong.vert").c_str(), game_internal::shaderPath("phong.frag").c_str());
     lampShader = new Shader(game_internal::shaderPath("lamp.vert").c_str(), game_internal::shaderPath("lamp.frag").c_str());
     particleShader = new Shader(game_internal::shaderPath("particle.vert").c_str(), game_internal::shaderPath("particle.frag").c_str());
@@ -18,8 +29,9 @@ Game::Game() {
         game_internal::shaderPath("crosshair.vert").c_str(),
         game_internal::shaderPath("crosshair.frag").c_str()
     );
+}
 
-    // Load objects
+void Game::loadMeshes() {
     Object* cube = new Object(game_internal::objectPath("cube.obj").c_str());
     cube->makeObject(*phongShader);
     objects.push_back(cube);
@@ -34,44 +46,31 @@ Game::Game() {
         capturePillarMesh = nullptr;
         std::cerr << "ERROR: capture_pillar.obj missing or unreadable — movable pillars will not render.\n";
     }
+}
 
-    // Rectangular pillars arranged as a full scene grid.
+void Game::buildSceneLayout() {
     const float pillarSpacing = 3.2f;
     const float pillarHalfWidth = 0.35f;
     const float pillarHeight = 5.8f;
     scenePillarHeight = pillarHeight;
     const float pillarCenterY = groundTopY + (pillarHeight * 0.5f);
     const int gridRadius = 3;
+
     for (int gx = -gridRadius; gx <= gridRadius; ++gx) {
         for (int gz = -gridRadius; gz <= gridRadius; ++gz) {
-            // Center slot reserved for the small lamp "receiver" pillar.
             if (gx == 0 && gz == 0) {
                 continue;
             }
             glm::mat4 pillarModel = glm::mat4(1.0f);
-            pillarModel = glm::translate(
-                pillarModel,
-                glm::vec3(gx * pillarSpacing, pillarCenterY, gz * pillarSpacing)
-            );
-            pillarModel = glm::scale(
-                pillarModel,
-                glm::vec3(pillarHalfWidth * 2.0f, pillarHeight, pillarHalfWidth * 2.0f)
-            );
+            pillarModel = glm::translate(pillarModel, glm::vec3(gx * pillarSpacing, pillarCenterY, gz * pillarSpacing));
+            pillarModel = glm::scale(pillarModel, glm::vec3(pillarHalfWidth * 2.0f, pillarHeight, pillarHalfWidth * 2.0f));
             extraCubeModels.push_back(pillarModel);
         }
     }
 
-    // Small "receiver" pillar at the center, height equal to the camera eye
-    // (= groundTopY + CAMERA_EYE_HEIGHT). Serves as a base to capture the lamp.
-    // It moves along Z via the rail.
     centerPillarBaseCenter = glm::vec3(0.0f, groundTopY, 0.0f);
-
-    // Beam starts from the blue source above the pillar, toward +X.
     beamDirection = glm::vec3(1.0f, 0.0f, 0.0f);
 
-    // Ground rail that visually guides the small pillar's movement.
-    // Aligned on Z, perpendicular to the beam direction (+X).
-    // The rail has no collider or shadow: it is rendered separately in renderSceneOpaque.
     const float railLength = 4.0f;
     const float railHalfWidthX = 0.08f;
     const float railHalfHeightY = 0.015f;
@@ -80,20 +79,13 @@ Game::Game() {
     railModel = glm::mat4(1.0f);
     railModel = glm::translate(railModel, glm::vec3(0.0f, groundTopY + railHalfHeightY, 0.0f));
     railModel = glm::scale(railModel, glm::vec3(railHalfWidthX * 2.0f, railHalfHeightY * 2.0f, railLength));
-
-    // Initialize pillar matrix.
     rebuildCenterPillarTransform();
 
-    // Second pillar identical to the emitter pillar, carries the deflector pyramid.
-    // Placed on the path swept by the beam (+X), movable on a rail
-    // aligned on X (perpendicular to the deflected beam +Z).
     const float kDeflectorPillarX = 5.5f;
     const float kDeflectorPillarZ = -1.5f;
     prismDeflectDirection = glm::vec3(0.0f, 0.0f, 1.0f);
     deflectorPillarBase = glm::vec3(kDeflectorPillarX, groundTopY, kDeflectorPillarZ);
 
-    // Ground rail that guides the deflector pillar. Aligned on X (perpendicular to the
-    // deflected beam). Like the center rail, it is purely decorative: no collider or shadow.
     const float kDeflectorRailLength = 4.0f;
     const float kDeflectorRailHalfWidthZ = 0.08f;
     const float kDeflectorRailHalfHeightY = 0.015f;
@@ -108,11 +100,8 @@ Game::Game() {
         deflectorRailModel,
         glm::vec3(kDeflectorRailLength, kDeflectorRailHalfHeightY * 2.0f, kDeflectorRailHalfWidthZ * 2.0f)
     );
-
-    // Initialize deflector pillar + pyramid position from parameters.
     rebuildDeflectorPillarTransform();
 
-    // Add a ceiling at pillar height, using the same textured cube pass.
     const float mapHalfExtent = worldCollisionHalfExtent;
     const float wallThickness = 0.6f;
     const float ceilingThickness = 0.6f;
@@ -123,25 +112,18 @@ Game::Game() {
 
     glm::mat4 ceilingModel = glm::mat4(1.0f);
     ceilingModel = glm::translate(ceilingModel, glm::vec3(0.0f, ceilingCenterY, 0.0f));
-    ceilingModel = glm::scale(
-        ceilingModel,
-        glm::vec3(mapHalfExtent * 2.0f, ceilingThickness, mapHalfExtent * 2.0f)
-    );
+    ceilingModel = glm::scale(ceilingModel, glm::vec3(mapHalfExtent * 2.0f, ceilingThickness, mapHalfExtent * 2.0f));
     extraCubeModels.push_back(ceilingModel);
 
-    // Perimeter: rows of pillars instead of walls, with a small wall section
-    // between two pillars to host each blue target.
     const float edgeInset = mapHalfExtent - pillarHalfWidth;
     const float kTarget1Z = 0.8f;
     const float kTarget2X = deflectorPillarBase.x - 1.0f;
     const float kTargetWallSpan = pillarSpacing * 0.75f;
+
     auto addStandardPillar = [&](float x, float z) {
         glm::mat4 pillarModel = glm::mat4(1.0f);
         pillarModel = glm::translate(pillarModel, glm::vec3(x, pillarCenterY, z));
-        pillarModel = glm::scale(
-            pillarModel,
-            glm::vec3(pillarHalfWidth * 2.0f, pillarHeight, pillarHalfWidth * 2.0f)
-        );
+        pillarModel = glm::scale(pillarModel, glm::vec3(pillarHalfWidth * 2.0f, pillarHeight, pillarHalfWidth * 2.0f));
         extraCubeModels.push_back(pillarModel);
     };
 
@@ -172,22 +154,15 @@ Game::Game() {
     }
 
     glm::mat4 eastTargetWall = glm::mat4(1.0f);
-    eastTargetWall = glm::translate(
-        eastTargetWall,
-        glm::vec3(mapHalfExtent - wallThickness * 0.5f, wallCenterY, kTarget1Z)
-    );
+    eastTargetWall = glm::translate(eastTargetWall, glm::vec3(mapHalfExtent - wallThickness * 0.5f, wallCenterY, kTarget1Z));
     eastTargetWall = glm::scale(eastTargetWall, glm::vec3(wallThickness, wallHeight, kTargetWallSpan));
     extraCubeModels.push_back(eastTargetWall);
 
     glm::mat4 southTargetWall = glm::mat4(1.0f);
-    southTargetWall = glm::translate(
-        southTargetWall,
-        glm::vec3(kTarget2X, wallCenterY, mapHalfExtent - wallThickness * 0.5f)
-    );
+    southTargetWall = glm::translate(southTargetWall, glm::vec3(kTarget2X, wallCenterY, mapHalfExtent - wallThickness * 0.5f));
     southTargetWall = glm::scale(southTargetWall, glm::vec3(kTargetWallSpan, wallHeight, wallThickness));
     extraCubeModels.push_back(southTargetWall);
 
-    // Lamp just below the slab: lights the underside of the ceiling (normal -Y).
     ceilingLightPosition = glm::vec3(
         0.0f,
         groundTopY + scenePillarHeight - sceneCeilingThickness - 0.12f,
@@ -201,7 +176,9 @@ Game::Game() {
     groundObject->model = glm::translate(groundObject->model, glm::vec3(0.0f, -1.25f, 0.0f));
     const float groundSpan = (worldCollisionHalfExtent * 2.0f) + 0.6f;
     groundObject->model = glm::scale(groundObject->model, glm::vec3(groundSpan, 0.5f, groundSpan));
+}
 
+void Game::initTextures() {
     groundDiffuseTexture = Texture::loadFromFile2D(
         game_internal::texturePath("ground/Ground081_1K-JPG/Ground081_1K-JPG_Color.jpg")
     );
@@ -228,17 +205,15 @@ Game::Game() {
     } else {
         std::cout << "INFO: Metal055 metal texture for receiver pillar not found." << std::endl;
     }
+}
 
+void Game::initRenderingResources() {
     shadowMap.init(game_internal::kShadowMapSize);
     skybox.init(cubemapShader);
     setupCrosshair();
     explosionParticles.init(particleShader);
     setupBeamTarget();
     setupDeflectorPrism();
-
-    // Enable depth testing
-    glEnable(GL_DEPTH_TEST);
-    rebuildSceneColliders();
 }
 
 Game::~Game() {

@@ -395,6 +395,7 @@ void Game::renderSceneOpaque(
         phongShader->setMat4("projection", projection);
         phongShader->setMat4("dynamicLightSpaceMatrix", shadowMap.getDynamicLightSpaceMatrix());
         phongShader->setInt("dynamicShadowMap", 5);
+        phongShader->setVec3("viewPos", cameraPosition);
         glActiveTexture(GL_TEXTURE5);
         glBindTexture(GL_TEXTURE_2D, shadowMap.getDynamicTexture());
         glActiveTexture(GL_TEXTURE0);
@@ -442,6 +443,7 @@ void Game::renderSceneOpaque(
     phongShader->setMat4("projection", projection);
     phongShader->setMat4("dynamicLightSpaceMatrix", shadowMap.getDynamicLightSpaceMatrix());
     phongShader->setInt("dynamicShadowMap", 5);
+    phongShader->setVec3("viewPos", cameraPosition);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, shadowMap.getDynamicTexture());
     glActiveTexture(GL_TEXTURE0);

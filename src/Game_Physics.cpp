@@ -3,6 +3,7 @@
 #include "GameInternal.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <vector>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -36,6 +37,88 @@ glm::mat4 buildCapturePillarModelMatrix(
     return glm::translate(glm::mat4(1.0f), glm::vec3(baseCenter.x, groundY, baseCenter.z))
         * glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ))
         * glm::translate(glm::mat4(1.0f), -meshBottomCenter);
+}
+
+
+static Collider buildColliderFromModel(const glm::mat4& model, bool canSupport = true) {
+    Collider c;
+    c.center = glm::vec3(model[3]);
+    c.halfExtents = glm::vec3(
+        std::abs(model[0][0]) * 0.5f,
+        std::abs(model[1][1]) * 0.5f,
+        std::abs(model[2][2]) * 0.5f
+    );
+    c.canSupport = canSupport;
+    return c;
+}
+
+static Collider buildPillarCollider(const glm::vec3& center, float halfWidth, float height, bool canSupport = false) {
+    Collider c;
+    c.center = center;
+    c.halfExtents = glm::vec3(halfWidth, height * 0.5f, halfWidth);
+    c.canSupport = canSupport;
+    return c;
+}
+
+static bool tryPushPillarOnRail(
+    int colliderIndex,
+    const glm::vec3& pillarCenter,
+    float halfWidth,
+    float height,
+    float& offset,
+    float railMin,
+    float railMax,
+    bool pushAlongX,
+    const glm::vec3& cameraPosition,
+    float cameraRadius,
+    float playerFeetY,
+    float playerHeadY,
+    const std::function<void()>& onMoved
+) {
+    if (colliderIndex < 0) {
+        return false;
+    }
+
+    const glm::vec3 half(halfWidth, height * 0.5f, halfWidth);
+    const glm::vec3 center = pillarCenter;
+    const glm::vec3 expanded = half + glm::vec3(cameraRadius);
+    const glm::vec3 min = center - expanded;
+    const glm::vec3 max = center + expanded;
+
+    if (!(cameraPosition.x > min.x && cameraPosition.x < max.x &&
+          playerFeetY < max.y && playerHeadY > min.y &&
+          cameraPosition.z > min.z && cameraPosition.z < max.z)) {
+        return false;
+    }
+
+    const float dxMin = cameraPosition.x - min.x;
+    const float dxMax = max.x - cameraPosition.x;
+    const float dzMin = cameraPosition.z - min.z;
+    const float dzMax = max.z - cameraPosition.z;
+    const float minPenX = std::min(dxMin, dxMax);
+    const float minPenZ = std::min(dzMin, dzMax);
+
+    const bool shouldPush = pushAlongX ? (minPenX <= minPenZ) : (minPenZ <= minPenX);
+    if (!shouldPush) {
+        return false;
+    }
+
+    float pushDelta = 0.0f;
+    if (pushAlongX) {
+        pushDelta = (dxMin <= dxMax) ? dxMin : -dxMax;
+    } else {
+        pushDelta = (dzMin <= dzMax) ? dzMin : -dzMax;
+    }
+
+    float newOffset = offset + pushDelta;
+    newOffset = std::max(railMin, std::min(railMax, newOffset));
+    const float actualDelta = newOffset - offset;
+    if (std::abs(actualDelta) > 0.00001f) {
+        offset = newOffset;
+        onMoved();
+        return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -200,81 +283,53 @@ void Game::UpdateMovablePillar(const glm::vec3& cameraPosition, float cameraRadi
     const float playerFeetY = cameraPosition.y - kCameraBodyHeight;
     const float playerHeadY = cameraPosition.y;
 
-    // Center pillar: rail aligned on Z, so push on Z when Z penetration is dominant.
-    // Logic is self-contained so the deflector pillar is tested independently,
-    // even if the center pillar was not touched.
-    if (centerPillarColliderIndex >= 0) {
-        const glm::vec3 cHalf(centerPillarHalfWidth, centerPillarHeight * 0.5f, centerPillarHalfWidth);
-        const glm::vec3 cCenter(
-            centerPillarBaseCenter.x,
-            groundTopY + centerPillarHeight * 0.5f,
-            centerPillarBaseCenter.z
-        );
-        const glm::vec3 cExp = cHalf + glm::vec3(cameraRadius);
-        const glm::vec3 cMin = cCenter - cExp;
-        const glm::vec3 cMax = cCenter + cExp;
-
-        if (cameraPosition.x > cMin.x && cameraPosition.x < cMax.x &&
-            playerFeetY < cMax.y && playerHeadY > cMin.y &&
-            cameraPosition.z > cMin.z && cameraPosition.z < cMax.z) {
-            const float dxMin = cameraPosition.x - cMin.x;
-            const float dxMax = cMax.x - cameraPosition.x;
-            const float dzMin = cameraPosition.z - cMin.z;
-            const float dzMax = cMax.z - cameraPosition.z;
-            const float minPenX = std::min(dxMin, dxMax);
-            const float minPenZ = std::min(dzMin, dzMax);
-
-            // Push only when entry is frontal on Z.
-            if (minPenZ <= minPenX) {
-                float pushDelta = (dzMin <= dzMax) ? dzMin : -dzMax;
-                float newOffset = centerPillarOffsetZ + pushDelta;
-                newOffset = std::max(centerPillarRailMin, std::min(centerPillarRailMax, newOffset));
-                pushDelta = newOffset - centerPillarOffsetZ;
-                if (std::abs(pushDelta) > 0.00001f) {
-                    centerPillarOffsetZ = newOffset;
-                    rebuildCenterPillarTransform();
-                    rebuildSceneColliders();
-                }
-            }
+    const glm::vec3 centerPillarCollisionCenter(
+        centerPillarBaseCenter.x,
+        groundTopY + centerPillarHeight * 0.5f,
+        centerPillarBaseCenter.z
+    );
+    tryPushPillarOnRail(
+        centerPillarColliderIndex,
+        centerPillarCollisionCenter,
+        centerPillarHalfWidth,
+        centerPillarHeight,
+        centerPillarOffsetZ,
+        centerPillarRailMin,
+        centerPillarRailMax,
+        false,
+        cameraPosition,
+        cameraRadius,
+        playerFeetY,
+        playerHeadY,
+        [&]() {
+            rebuildCenterPillarTransform();
+            rebuildSceneColliders();
         }
-    }
+    );
 
-    // Deflector pillar: rail aligned on X, push on X when X penetration is dominant.
-    // Independent from the center pillar test.
-    if (deflectorPillarColliderIndex >= 0) {
-        const glm::vec3 dHalf(centerPillarHalfWidth, centerPillarHeight * 0.5f, centerPillarHalfWidth);
-        const glm::vec3 dCenter(
-            deflectorPillarBase.x + deflectorPillarOffsetX,
-            groundTopY + centerPillarHeight * 0.5f,
-            deflectorPillarBase.z
-        );
-        const glm::vec3 dExp = dHalf + glm::vec3(cameraRadius);
-        const glm::vec3 dMin = dCenter - dExp;
-        const glm::vec3 dMax = dCenter + dExp;
-
-        if (cameraPosition.x > dMin.x && cameraPosition.x < dMax.x &&
-            playerFeetY < dMax.y && playerHeadY > dMin.y &&
-            cameraPosition.z > dMin.z && cameraPosition.z < dMax.z) {
-            const float ddxMin = cameraPosition.x - dMin.x;
-            const float ddxMax = dMax.x - cameraPosition.x;
-            const float ddzMin = cameraPosition.z - dMin.z;
-            const float ddzMax = dMax.z - cameraPosition.z;
-            const float dMinPenX = std::min(ddxMin, ddxMax);
-            const float dMinPenZ = std::min(ddzMin, ddzMax);
-
-            if (dMinPenX <= dMinPenZ) {
-                float dPushDelta = (ddxMin <= ddxMax) ? ddxMin : -ddxMax;
-                float dNewOffset = deflectorPillarOffsetX + dPushDelta;
-                dNewOffset = std::max(deflectorRailMin, std::min(deflectorRailMax, dNewOffset));
-                dPushDelta = dNewOffset - deflectorPillarOffsetX;
-                if (std::abs(dPushDelta) > 0.00001f) {
-                    deflectorPillarOffsetX = dNewOffset;
-                    rebuildDeflectorPillarTransform();
-                    rebuildSceneColliders();
-                }
-            }
+    const glm::vec3 deflectorPillarCollisionCenter(
+        deflectorPillarBase.x + deflectorPillarOffsetX,
+        groundTopY + centerPillarHeight * 0.5f,
+        deflectorPillarBase.z
+    );
+    tryPushPillarOnRail(
+        deflectorPillarColliderIndex,
+        deflectorPillarCollisionCenter,
+        centerPillarHalfWidth,
+        centerPillarHeight,
+        deflectorPillarOffsetX,
+        deflectorRailMin,
+        deflectorRailMax,
+        true,
+        cameraPosition,
+        cameraRadius,
+        playerFeetY,
+        playerHeadY,
+        [&]() {
+            rebuildDeflectorPillarTransform();
+            rebuildSceneColliders();
         }
-    }
+    );
 }
 
 void Game::rebuildSceneColliders() {
@@ -283,25 +338,10 @@ void Game::rebuildSceneColliders() {
     deflectorPillarColliderIndex = -1;
 
     for (const auto& cubeModel : extraCubeModels) {
-        Collider extraCubeCollider;
-        extraCubeCollider.center = glm::vec3(cubeModel[3]);
-        extraCubeCollider.halfExtents = glm::vec3(
-            std::abs(cubeModel[0][0]) * 0.5f,
-            std::abs(cubeModel[1][1]) * 0.5f,
-            std::abs(cubeModel[2][2]) * 0.5f
-        );
-        colliderWorld.add(extraCubeCollider);
+        colliderWorld.add(buildColliderFromModel(cubeModel));
     }
 
-    auto addMovablePillarCollider = [&](const glm::vec3& center, float halfWidth, float height, int& outIndex) {
-        Collider pillarCollider;
-        pillarCollider.center = center;
-        pillarCollider.halfExtents = glm::vec3(halfWidth, height * 0.5f, halfWidth);
-        pillarCollider.canSupport = false;
-        outIndex = colliderWorld.add(pillarCollider);
-    };
-
-    addMovablePillarCollider(
+    centerPillarColliderIndex = colliderWorld.add(buildPillarCollider(
         glm::vec3(
             centerPillarBaseCenter.x,
             groundTopY + centerPillarHeight * 0.5f,
@@ -309,9 +349,10 @@ void Game::rebuildSceneColliders() {
         ),
         centerPillarHalfWidth,
         centerPillarHeight,
-        centerPillarColliderIndex
-    );
-    addMovablePillarCollider(
+        false
+    ));
+
+    deflectorPillarColliderIndex = colliderWorld.add(buildPillarCollider(
         glm::vec3(
             deflectorPillarBase.x + deflectorPillarOffsetX,
             groundTopY + centerPillarHeight * 0.5f,
@@ -319,17 +360,10 @@ void Game::rebuildSceneColliders() {
         ),
         centerPillarHalfWidth,
         centerPillarHeight,
-        deflectorPillarColliderIndex
-    );
+        false
+    ));
 
-    Collider groundCollider;
-    groundCollider.center = glm::vec3(groundObject->model[3]);
-    groundCollider.halfExtents = glm::vec3(
-        std::abs(groundObject->model[0][0]) * 0.5f,
-        std::abs(groundObject->model[1][1]) * 0.5f,
-        std::abs(groundObject->model[2][2]) * 0.5f
-    );
-    colliderWorld.add(groundCollider);
+    colliderWorld.add(buildColliderFromModel(groundObject->model));
 }
 
 bool Game::isSegmentCollidingWithScene(const glm::vec3& start, const glm::vec3& end, float radius) const {

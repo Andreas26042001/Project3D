@@ -29,6 +29,7 @@ uniform float beamLightStrengths[2];
 uniform sampler2D diffuseMap;
 uniform int useTexture;
 uniform vec2 uvScale;
+uniform vec3 viewPos;
 uniform sampler2D dynamicShadowMap;
 uniform int dynamicShadowActive;
 uniform mat4 dynamicLightSpaceMatrix;
@@ -60,6 +61,7 @@ void main() {
 
     vec3 ambient = vec3(0.028, 0.026, 0.022) * material.ambient;
     vec3 norm = normalize(Normal);
+    vec3 viewDir = normalize(viewPos - FragPos);
 
     vec3 topLight = vec3(0.0);
     {
@@ -77,12 +79,14 @@ void main() {
         vec3 dynamicDir = normalize(toDynamic);
         float dynamicAttenuation = 1.0 / (1.0 + ceilingAttLinear * dynamicDistance + ceilingAttQuadratic * dynamicDistance * dynamicDistance);
         float dynamicDiff = pow(max(dot(norm, dynamicDir), 0.0), 2.8);
+        float dynamicSpec = pow(max(dot(norm, normalize(dynamicDir + viewDir)), 0.0), 64.0);
         float dynamicShadow = 0.0;
         if (dynamicShadowActive != 0) {
             dynamicShadow = calculateShadow(FragPosDynamicLightSpace, norm, dynamicDir, dynamicLightSpaceMatrix, dynamicShadowMap);
         }
         topLight += dynamicLightStrength * dynamicAttenuation * 0.10 * material.ambient * dynamicLightColor;
         topLight += dynamicLightStrength * dynamicAttenuation * (1.0 - dynamicShadow) * dynamicDiff * sampledDiffuse * dynamicLightColor;
+        topLight += dynamicLightStrength * dynamicAttenuation * 0.25 * dynamicSpec * dynamicLightColor;
     }
 
     for (int i = 0; i < 2; ++i) {
@@ -98,8 +102,10 @@ void main() {
         vec3 beamDir = beamDistance > 0.0001 ? beamToFrag / beamDistance : vec3(0.0, 1.0, 0.0);
         float beamAttenuation = 1.0 / (1.0 + ceilingAttLinear * beamDistance + ceilingAttQuadratic * beamDistance * beamDistance);
         float beamDiff = pow(max(dot(norm, beamDir), 0.0), 2.8);
+        float beamSpec = pow(max(dot(norm, normalize(beamDir + viewDir)), 0.0), 64.0);
         topLight += beamLightStrengths[i] * beamAttenuation * 0.10 * material.ambient * beamLightColors[i];
         topLight += beamLightStrengths[i] * beamAttenuation * 0.95 * beamDiff * sampledDiffuse * beamLightColors[i];
+        topLight += beamLightStrengths[i] * beamAttenuation * 0.35 * beamSpec * beamLightColors[i];
     }
 
     vec3 result = ambient + topLight;
