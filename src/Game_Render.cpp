@@ -45,7 +45,7 @@ float groundTopFromModel(const glm::mat4& groundModel) {
 }
 
 void disableLampEdgeClip(Shader* lampShader) {
-    if (lampShader == nullptr) {
+    if (!lampShader) {
         return;
     }
     lampShader->setInt("useEdgeClipPlanes", 0);
@@ -54,7 +54,7 @@ void disableLampEdgeClip(Shader* lampShader) {
 } // namespace
 
 void Game::drawMovablePillarPhong(const glm::mat4& pillarModelMatrix) {
-    if (capturePillarMesh == nullptr || phongShader == nullptr) {
+    if (!capturePillarMesh || !phongShader) {
         return;
     }
 
@@ -80,7 +80,7 @@ void Game::drawMovablePillarPhong(const glm::mat4& pillarModelMatrix) {
 
 void Game::drawMovablePillarShadows() {
     // Depth pass §7.4: only objects that cast shadows (casters).
-    if (capturePillarMesh == nullptr || shadowDepthShader == nullptr) {
+    if (!capturePillarMesh || !shadowDepthShader) {
         return;
     }
 
@@ -92,7 +92,7 @@ void Game::drawMovablePillarShadows() {
 
 void Game::renderPlanarShadows(const glm::mat4& view, const glm::mat4& projection) {
     // RTR4 §7.1.1: geometric projection; stencil limits the receiver to the marked ground.
-    if (objects.empty() || lampShader == nullptr || groundObject == nullptr) {
+    if (objects.empty() || !lampShader || !groundObject) {
         return;
     }
 
@@ -280,7 +280,7 @@ void Game::renderShadowMap() {
         params.lightDirection = lightProjectileDirection;
     }
 
-    shadowMap.render(params, shadowDepthShader, [this](Shader* depthShader, bool ceilingCastersOnly) {
+    shadowMap.render(params, shadowDepthShader.get(), [this](Shader* depthShader, bool ceilingCastersOnly) {
         (void)depthShader;
         if (ceilingCastersOnly) {
             for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
@@ -473,7 +473,7 @@ void Game::renderSceneOpaque(
         lampShader->use();
         lampShader->setMat4("view", view);
         lampShader->setMat4("projection", projection);
-        disableLampEdgeClip(lampShader);
+        disableLampEdgeClip(lampShader.get());
         const glm::vec3 lampColor = lightProjectileActive
             ? glm::vec3(0.06f, 0.18f, 2.0f)
             : dynamicLightColor;
@@ -495,7 +495,7 @@ void Game::renderSceneOpaque(
         lampShader->use();
         lampShader->setMat4("view", view);
         lampShader->setMat4("projection", projection);
-        disableLampEdgeClip(lampShader);
+        disableLampEdgeClip(lampShader.get());
         lampShader->setVec3("lightColor", railColor);
         lampShader->setMat4("model", railModel);
         lightMarker->draw();
@@ -514,7 +514,7 @@ void Game::renderSceneOpaque(
         lampShader->use();
         lampShader->setMat4("view", view);
         lampShader->setMat4("projection", projection);
-        disableLampEdgeClip(lampShader);
+        disableLampEdgeClip(lampShader.get());
         lampShader->setVec3("lightColor", beamColor);
 
         for (int i = 0; i < beamCount; ++i) {
@@ -538,7 +538,7 @@ void Game::renderSceneOpaque(
     lampShader->use();
     lampShader->setMat4("view", view);
     lampShader->setMat4("projection", projection);
-    disableLampEdgeClip(lampShader);
+    disableLampEdgeClip(lampShader.get());
     lampShader->setVec3("lightColor", ceilingLightColor);
     glm::mat4 ceilingLightModel = glm::mat4(1.0f);
     ceilingLightModel = glm::translate(ceilingLightModel, ceilingLightPosition);
@@ -550,7 +550,7 @@ void Game::renderSceneOpaque(
     lampShader->use();
     lampShader->setMat4("view", view);
     lampShader->setMat4("projection", projection);
-    disableLampEdgeClip(lampShader);
+    disableLampEdgeClip(lampShader.get());
     lampShader->setVec3("lightColor", glm::vec3(1.0f, 0.95f, 0.25f));
     glm::mat4 playerModel = glm::mat4(1.0f);
     playerModel = glm::translate(playerModel, playerWorldPosition);
@@ -742,7 +742,7 @@ void Game::renderBeamTarget(const glm::mat4& view, const glm::mat4& projection) 
     lampShader->use();
     lampShader->setMat4("view", view);
     lampShader->setMat4("projection", projection);
-    disableLampEdgeClip(lampShader);
+    disableLampEdgeClip(lampShader.get());
     glBindVertexArray(targetVAO);
 
     // Target 1 (east wall, main beam).
@@ -760,7 +760,7 @@ void Game::renderBeamTarget(const glm::mat4& view, const glm::mat4& projection) 
 }
 
 void Game::setupDeflectorPrism() {
-    prismShader = new Shader(
+    prismShader = std::make_unique<Shader>(
         game_internal::shaderPath("prism.vert").c_str(),
         game_internal::shaderPath("prism.frag").c_str()
     );

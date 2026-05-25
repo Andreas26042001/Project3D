@@ -20,30 +20,53 @@ Game::Game() {
 }
 
 void Game::initShaders() {
-    phongShader = new Shader(game_internal::shaderPath("phong.vert").c_str(), game_internal::shaderPath("phong.frag").c_str());
-    lampShader = new Shader(game_internal::shaderPath("lamp.vert").c_str(), game_internal::shaderPath("lamp.frag").c_str());
-    particleShader = new Shader(game_internal::shaderPath("particle.vert").c_str(), game_internal::shaderPath("particle.frag").c_str());
-    cubemapShader = new Shader(game_internal::shaderPath("cubemap.vert").c_str(), game_internal::shaderPath("cubemap.frag").c_str());
-    shadowDepthShader = new Shader(game_internal::shaderPath("shadow_depth.vert").c_str(), game_internal::shaderPath("shadow_depth.frag").c_str());
-    crosshairShader = new Shader(
+    phongShader = std::make_unique<Shader>(
+        game_internal::shaderPath("phong.vert").c_str(),
+        game_internal::shaderPath("phong.frag").c_str()
+    );
+
+    lampShader = std::make_unique<Shader>(
+        game_internal::shaderPath("lamp.vert").c_str(),
+        game_internal::shaderPath("lamp.frag").c_str()
+    );
+
+    particleShader = std::make_unique<Shader>(
+        game_internal::shaderPath("particle.vert").c_str(),
+        game_internal::shaderPath("particle.frag").c_str()
+    );
+
+    cubemapShader = std::make_unique<Shader>(
+        game_internal::shaderPath("cubemap.vert").c_str(),
+        game_internal::shaderPath("cubemap.frag").c_str()
+    );
+
+    shadowDepthShader = std::make_unique<Shader>(
+        game_internal::shaderPath("shadow_depth.vert").c_str(),
+        game_internal::shaderPath("shadow_depth.frag").c_str()
+    );
+
+    crosshairShader = std::make_unique<Shader>(
         game_internal::shaderPath("crosshair.vert").c_str(),
         game_internal::shaderPath("crosshair.frag").c_str()
     );
 }
 
 void Game::loadMeshes() {
-    Object* cube = new Object(game_internal::objectPath("cube.obj").c_str());
+    auto cube = std::make_unique<Object>(game_internal::objectPath("cube.obj").c_str());
     cube->makeObject(*phongShader);
-    objects.push_back(cube);
+    objects.push_back(std::move(cube));
 
-    capturePillarMesh = new Object(game_internal::objectPath("capture_pillar.obj").c_str());
+    capturePillarMesh = std::make_unique<Object>(
+        game_internal::objectPath("capture_pillar.obj").c_str()
+    );
+
     if (!capturePillarMesh->vertices.empty()) {
         capturePillarMesh->makeObject(*phongShader);
-        std::cout << "Loaded movable pillar OBJ mesh (" << capturePillarMesh->vertices.size()
+        std::cout << "Loaded movable pillar OBJ mesh ("
+                  << capturePillarMesh->vertices.size()
                   << " vertices).\n";
     } else {
-        delete capturePillarMesh;
-        capturePillarMesh = nullptr;
+        capturePillarMesh.reset();
         std::cerr << "ERROR: capture_pillar.obj missing or unreadable — movable pillars will not render.\n";
     }
 }
@@ -169,9 +192,10 @@ void Game::buildSceneLayout() {
         0.0f
     );
 
-    lightMarker = new Object(game_internal::objectPath("cube.obj").c_str());
+    lightMarker = std::make_unique<Object>(game_internal::objectPath("cube.obj").c_str());
     lightMarker->makeObject(*lampShader, false);
-    groundObject = new Object(game_internal::objectPath("cube.obj").c_str());
+
+    groundObject = std::make_unique<Object>(game_internal::objectPath("cube.obj").c_str());
     groundObject->makeObject(*phongShader);
     groundObject->model = glm::translate(groundObject->model, glm::vec3(0.0f, -1.25f, 0.0f));
     const float groundSpan = (worldCollisionHalfExtent * 2.0f) + 0.6f;
@@ -209,41 +233,30 @@ void Game::initTextures() {
 
 void Game::initRenderingResources() {
     shadowMap.init(game_internal::kShadowMapSize);
-    skybox.init(cubemapShader);
+    skybox.init(cubemapShader.get());
     setupCrosshair();
-    explosionParticles.init(particleShader);
+    explosionParticles.init(particleShader.get());
     setupBeamTarget();
     setupDeflectorPrism();
 }
 
 Game::~Game() {
-    for (auto obj : objects) {
-        delete obj;
-    }
-    delete phongShader;
-    delete lampShader;
-    delete particleShader;
-    delete cubemapShader;
-    delete crosshairShader;
-    delete shadowDepthShader;
-    delete lightMarker;
-    delete groundObject;
-    if (capturePillarMesh != nullptr) {
-        delete capturePillarMesh;
-    }
     glDeleteVertexArrays(1, &crosshairVAO);
     glDeleteBuffers(1, &crosshairVBO);
+
     if (targetVAO != 0) {
         glDeleteVertexArrays(1, &targetVAO);
     }
+
     if (targetVBO != 0) {
         glDeleteBuffers(1, &targetVBO);
     }
+
     if (prismVAO != 0) {
         glDeleteVertexArrays(1, &prismVAO);
     }
+
     if (prismVBO != 0) {
         glDeleteBuffers(1, &prismVBO);
     }
-    delete prismShader;
 }

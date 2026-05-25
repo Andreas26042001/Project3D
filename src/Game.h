@@ -2,6 +2,7 @@
 #define GAME_H
 
 #include <vector>
+#include <memory>
 #include <glad/glad.h>
 #include "object.h"
 #include "Collider.h"
@@ -35,7 +36,7 @@ private:
     ParticleSystem explosionParticles;
     ShadowMap shadowMap;
 
-    std::vector<Object*> objects;
+    std::vector<std::unique_ptr<Object>> objects;
     std::vector<glm::mat4> extraCubeModels;
 
     // Scene layout
@@ -73,7 +74,7 @@ private:
     GLuint prismVAO = 0;
     GLuint prismVBO = 0;
     int prismVertexCount = 0;
-    Shader* prismShader = nullptr;
+    std::unique_ptr<Shader> prismShader;
     glm::vec3 prismCenter;
     float prismRadius = 0.33f;
     glm::vec3 prismDeflectDirection{0.0f, 0.0f, 1.0f};
@@ -85,18 +86,19 @@ private:
     glm::vec3 deflectorPillarBase;
     glm::mat4 capturePillarModelMatrix;
     glm::mat4 deflectorPillarModelMatrix;
-    Object* capturePillarMesh = nullptr;
+    std::unique_ptr<Object> capturePillarMesh;
     Texture capturePillarMetalTexture;
 
     // GPU resources
-    Shader* phongShader = nullptr;
-    Shader* lampShader = nullptr;
-    Shader* particleShader = nullptr;
-    Shader* cubemapShader = nullptr;
-    Shader* crosshairShader = nullptr;
-    Shader* shadowDepthShader = nullptr;
-    Object* lightMarker = nullptr;
-    Object* groundObject = nullptr;
+    std::unique_ptr<Shader> phongShader;
+    std::unique_ptr<Shader> lampShader;
+    std::unique_ptr<Shader> particleShader;
+    std::unique_ptr<Shader> cubemapShader;
+    std::unique_ptr<Shader> crosshairShader;
+    std::unique_ptr<Shader> shadowDepthShader;
+
+    std::unique_ptr<Object> lightMarker;
+    std::unique_ptr<Object> groundObject;
     Texture groundDiffuseTexture;
     Texture pillarDiffuseTexture;
     GLuint crosshairVAO = 0;

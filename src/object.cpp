@@ -125,7 +125,7 @@ void Object::makeObject(const Shader& shader, bool texture) {
 
     releaseGpuResources();
 
-    float* data = new float[8 * numVertices];
+    std::vector<float> data(8 * numVertices);
     for (int i = 0; i < numVertices; ++i) {
         const Vertex& vertex = vertices.at(static_cast<size_t>(i));
         data[i * 8 + 0] = vertex.Position.x;
@@ -143,7 +143,7 @@ void Object::makeObject(const Shader& shader, bool texture) {
 
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 8 * numVertices, data, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * data.size(), data.data(), GL_STATIC_DRAW);
 
     const GLint attPos = glGetAttribLocation(shader.ID, "aPos");
     glEnableVertexAttribArray(attPos);
@@ -175,7 +175,6 @@ void Object::makeObject(const Shader& shader, bool texture) {
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
-    delete[] data;
 }
 
 void Object::draw() const {
