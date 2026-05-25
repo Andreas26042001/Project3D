@@ -18,6 +18,18 @@
 
 class Player;
 
+struct LightingRenderData {
+    bool dynamicLightActive = false;
+    glm::vec3 dynamicLightColor{1.0f};
+    float dynamicLightStrength = 0.0f;
+
+    int beamCount = 0;
+    glm::vec3 beamStarts[2];
+    glm::vec3 beamEnds[2];
+    glm::vec3 beamColor{0.30f, 0.60f, 1.00f};
+    float beamStrength = 0.0f;
+};
+
 class Game {
 public:
     static constexpr float kLightSourceOffsetY = 0.18f;
@@ -128,11 +140,48 @@ private:
 
     
     void renderCrosshair();
-    void renderSceneOpaque(
+    void setupOpaqueRenderState();
+    void renderCeilingLight(
+        const glm::mat4& view,
+        const glm::mat4& projection
+    );
+    void renderRails(
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        bool beamActive
+    );
+    void renderBeam(
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const LightingRenderData& lighting
+    );
+    LightingRenderData buildLightingRenderData(
+        const glm::vec3& beamSourcePos
+    ) const;
+
+    void applyPhongLightingUniforms(const LightingRenderData& lighting);
+    void renderStaticCubes(
         const glm::mat4& view,
         const glm::mat4& projection,
         const glm::vec3& cameraPosition,
-        const glm::vec3& playerWorldPosition
+        const LightingRenderData& lighting);
+
+    void renderGround(
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const glm::vec3& cameraPosition,
+        const LightingRenderData& lighting
+    );
+       
+    void renderSceneOpaque(
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const glm::vec3& cameraPosition
+    );
+    void renderProjectileLight(
+        const glm::mat4& view,
+        const glm::mat4& projection,
+        const glm::vec3& dynamicLightColor
     );
     void renderShadowMap();
     void rebuildSceneColliders();

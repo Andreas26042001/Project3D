@@ -268,28 +268,31 @@ BeamTrace Game::traceAnchoredBeam(float maxDistance) const {
 }
 
 void Game::renderShadowMap() {
-    if (objects.empty() || shadowDepthShader == nullptr) {
+    if (objects.empty() || !shadowDepthShader) {
         return;
     }
 
     const bool dynamicActive = lightProjectile.active || lightProjectile.anchoredOnPillar;
+
     ShadowMap::RenderParams params;
     params.dynamicActive = dynamicActive;
+
     if (dynamicActive) {
         params.lightPosition = lightProjectile.position;
         params.lightDirection = lightProjectile.direction;
     }
 
     shadowMap.render(params, shadowDepthShader.get(), [this](Shader* depthShader, bool ceilingCastersOnly) {
-        (void)depthShader;
         if (ceilingCastersOnly) {
             for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
                 if (!isCeilingShadowCaster(extraCubeModels[ci])) {
                     continue;
                 }
-                shadowDepthShader->setMat4("model", extraCubeModels[ci]);
+
+                depthShader->setMat4("model", extraCubeModels[ci]);
                 objects[0]->draw();
             }
+
             drawMovablePillarShadows();
         }
     });
@@ -310,7 +313,7 @@ void Game::Render(const Player& player) {
     glDisable(GL_CULL_FACE);
 
     glm::mat4 view = camera.GetViewMatrix();
-    renderSceneOpaque(view, projection, camera.Position, playerWorldPosition);
+    renderSceneOpaque(view, projection, camera.Position);
     skybox.render(view, projection);
     explosionParticles.render(view, projection);
     renderDeflectorPrism(view, projection, camera.Position);
@@ -322,119 +325,244 @@ void Game::SetViewportSize(int width, int height) {
     viewportHeight = std::max(1, height);
 }
 
-void Game::renderSceneOpaque(
-    const glm::mat4& view,
-    const glm::mat4& projection,
-    const glm::vec3& cameraPosition,
-    const glm::vec3& playerWorldPosition
-) {
+void Game::setupOpaqueRenderState() {
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
+
     glDisable(GL_BLEND);
     glDisable(GL_STENCIL_TEST);
+
     for (int i = 0; i < 4; ++i) {
         glDisable(static_cast<GLenum>(GL_CLIP_DISTANCE1 + i));
     }
+}
 
-    const bool dynamicLightActive = lightProjectile.active || lightProjectile.anchoredOnPillar;
-    const bool beamActive = lightProjectile.anchoredOnPillar && !lightProjectile.anchorAnimating;
+void Game::renderProjectileLight(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const glm::vec3& dynamicLightColor
+) {
+    if (!lightMarker || !lampShader) {
+        return;
+    }
+
+    lampShader->use();
+    lampShader->setMat4("view", view);
+    lampShader->setMat4("projection", projection);
+    disableLampEdgeClip(lampShader.get());
+    lampShader->setVec3("lightColor", dynamicLightColor);
+
+    glm::mat4 lightModel = glm::mat4(1.0f);
+    lightModel = glm::translate(lightModel, lightProjectile.position);
+    lightModel = glm::scale(lightModel, glm::vec3(0.14f));
+
+    lampShader->setMat4("model", lightModel);
+    lightMarker->draw();
+}
+
+void Game::renderCeilingLight(
+    const glm::mat4& view,
+    const glm::mat4& projection
+) {
+    if (!lightMarker || !lampShader) {
+        return;
+    }
+
+    lampShader->use();
+    lampShader->setMat4("view", view);
+    lampShader->setMat4("projection", projection);
+    disableLampEdgeClip(lampShader.get());
+    lampShader->setVec3("lightColor", glm::vec3(1.0f, 0.88f, 0.35f));
+
+    glm::mat4 ceilingLightModel = glm::mat4(1.0f);
+    ceilingLightModel = glm::translate(ceilingLightModel, ceilingLightPosition);
+    ceilingLightModel = glm::scale(ceilingLightModel, glm::vec3(0.10f));
+
+    lampShader->setMat4("model", ceilingLightModel);
+    lightMarker->draw();
+}
+
+void Game::renderRails(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    bool beamActive
+) {
+    if (!lampShader || !lightMarker) {
+        return;
+    }
+
+    const glm::vec3 railIdle(0.10f, 0.18f, 0.32f);
+    const glm::vec3 railActive(0.30f, 0.60f, 1.00f);
+
+    const glm::vec3 railColor =
+        beamActive ? railActive : railIdle;
+
+    lampShader->use();
+    lampShader->setMat4("view", view);
+    lampShader->setMat4("projection", projection);
+
+    disableLampEdgeClip(lampShader.get());
+
+    lampShader->setVec3("lightColor", railColor);
+
+    lampShader->setMat4("model", railModel);
+    lightMarker->draw();
+
+    lampShader->setMat4("model", deflectorRailModel);
+    lightMarker->draw();
+}
+
+LightingRenderData Game::buildLightingRenderData(
+    const glm::vec3& beamSourcePos
+) const {
+    LightingRenderData lighting;
+
+    const bool beamActive =
+        lightProjectile.anchoredOnPillar && !lightProjectile.anchorAnimating;
+
     const glm::vec3 projectileBlue(0.10f, 0.28f, 1.00f);
-    const glm::vec3 dynamicLightColor = lightProjectile.active
-        ? projectileBlue
-        : glm::vec3(0.30f, 0.60f, 1.00f);
-    const float dynamicLightStrength = lightProjectile.active
-        ? 4.8f
-        : (lightProjectile.anchoredOnPillar ? 1.0f : 1.6f);
-    const glm::vec3 beamColor(0.30f, 0.60f, 1.00f);
-    const float kBeamStrength = beamActive ? 1.0f : 1.8f;
-    const float kMaxBeamDistance = 40.0f;
+    const glm::vec3 anchoredBlue(0.30f, 0.60f, 1.00f);
 
-    int beamCount = 0;
-    glm::vec3 beamStarts[2] = {beamSourcePos, beamSourcePos};
-    glm::vec3 beamEnds[2] = {beamSourcePos, beamSourcePos};
-    float beamLengths[2] = {0.0f, 0.0f};
+    lighting.dynamicLightActive =
+        lightProjectile.active || lightProjectile.anchoredOnPillar;
+
+    lighting.dynamicLightColor =
+        lightProjectile.active ? projectileBlue : anchoredBlue;
+
+    lighting.dynamicLightStrength =
+        lightProjectile.active ? 4.8f :
+        (lightProjectile.anchoredOnPillar ? 1.0f : 1.6f);
+
+    lighting.beamColor = anchoredBlue;
+    lighting.beamStrength = beamActive ? 1.0f : 1.8f;
 
     if (beamActive) {
-        const BeamTrace beam = traceAnchoredBeam(kMaxBeamDistance);
-        beamCount = beam.segmentCount;
-        for (int i = 0; i < beamCount; ++i) {
-            beamStarts[i] = beam.starts[i];
-            beamEnds[i] = beam.ends[i];
-            beamLengths[i] = beam.lengths[i];
+        const BeamTrace beam = traceAnchoredBeam(40.0f);
+
+        lighting.beamCount = beam.segmentCount;
+
+        for (int i = 0; i < lighting.beamCount; ++i) {
+            lighting.beamStarts[i] = beam.starts[i];
+            lighting.beamEnds[i] = beam.ends[i];
+        }
+    } else {
+        lighting.beamCount = 0;
+
+        for (int i = 0; i < 2; ++i) {
+            lighting.beamStarts[i] = beamSourcePos;
+            lighting.beamEnds[i] = beamSourcePos;
         }
     }
 
-    auto applyPhongLightingUniforms = [&]() {
-        phongShader->setVec3("ceilingLightPos", ceilingLightPosition);
-        phongShader->setVec3("ceilingLightColor", ceilingLightColor);
-        phongShader->setFloat("ceilingLightStrength", ceilingLightStrength);
-        // Point attenuation: ~25% intensity at ceilingLightRange meters (isotropic, distance only).
-        const float rangeFactor = std::max(1.0f, ceilingLightRange);
-        phongShader->setFloat("ceilingAttLinear", 1.0f / rangeFactor);
-        phongShader->setFloat("ceilingAttQuadratic", 2.0f / (rangeFactor * rangeFactor));
-        phongShader->setInt("dynamicLightActive", dynamicLightActive ? 1 : 0);
-        if (dynamicLightActive) {
-            phongShader->setVec3("dynamicLightPos", lightProjectile.position);
-        }
-        phongShader->setVec3("dynamicLightColor", dynamicLightColor);
-        phongShader->setFloat("dynamicLightStrength", dynamicLightActive ? dynamicLightStrength : 0.0f);
-        phongShader->setInt("dynamicShadowActive", dynamicLightActive ? 1 : 0);
-        phongShader->setInt("beamLightCount", beamCount);
-        for (int i = 0; i < beamCount; ++i) {
-            phongShader->setVec3("beamLightStarts[" + std::to_string(i) + "]", beamStarts[i]);
-            phongShader->setVec3("beamLightEnds[" + std::to_string(i) + "]", beamEnds[i]);
-            phongShader->setVec3("beamLightColors[" + std::to_string(i) + "]", beamColor);
-            phongShader->setFloat("beamLightStrengths[" + std::to_string(i) + "]", kBeamStrength);
-        }
-    };
+    return lighting;
+}
 
-    if (!objects.empty()) {
-        phongShader->use();
-        phongShader->setMat4("view", view);
-        phongShader->setMat4("projection", projection);
-        phongShader->setMat4("dynamicLightSpaceMatrix", shadowMap.getDynamicLightSpaceMatrix());
-        phongShader->setInt("dynamicShadowMap", 5);
-        phongShader->setVec3("viewPos", cameraPosition);
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, shadowMap.getDynamicTexture());
-        glActiveTexture(GL_TEXTURE0);
-        applyPhongLightingUniforms();
-        phongShader->setInt("useTexture", 0);
-        phongShader->setInt("diffuseMap", 0);
-        phongShader->setVec2("uvScale", glm::vec2(1.0f, 1.0f));
-        phongShader->setVec3("material.ambient", glm::vec3(0.10f, 0.10f, 0.10f));
-        phongShader->setVec3("material.diffuse", glm::vec3(1.0f, 1.0f, 1.0f));
+void Game::applyPhongLightingUniforms(
+    const LightingRenderData& lighting
+) {
+    if (!phongShader) {
+        return;
+    }
 
-        for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
-            const glm::mat4& cubeModel = extraCubeModels[ci];
-            const float sy = std::abs(cubeModel[1][1]);
-            if (pillarDiffuseTexture.isValid()) {
-                const float sx = std::abs(cubeModel[0][0]);
-                const float sz = std::abs(cubeModel[2][2]);
+    phongShader->setVec3("ceilingLightPos", ceilingLightPosition);
+    phongShader->setVec3("ceilingLightColor", ceilingLightColor);
+    phongShader->setFloat("ceilingLightStrength", ceilingLightStrength);
 
-                phongShader->setInt("useTexture", 1);
-                if (sy < 1.0f) {
-                    // Ceiling: strong tiling on both axes to avoid giant stretched bricks.
-                    phongShader->setVec2("uvScale", glm::vec2(12.0f, 12.0f));
-                } else if (sx > 10.0f || sz > 10.0f) {
-                    // Perimeter walls: repeat a lot on length, enough on height.
-                    phongShader->setVec2("uvScale", glm::vec2(12.0f, 4.0f));
-                } else {
-                    // Pillars: tall but much thinner.
-                    phongShader->setVec2("uvScale", glm::vec2(1.2f, 8.0f));
-                }
-                pillarDiffuseTexture.bind(0);
-            }
-            phongShader->setMat4("model", cubeModel);
-            objects[0]->draw();
-        }
-        drawMovablePillarPhong(capturePillarModelMatrix);
-        drawMovablePillarPhong(deflectorPillarModelMatrix);
+    const float rangeFactor = std::max(1.0f, ceilingLightRange);
+    phongShader->setFloat("ceilingAttLinear", 1.0f / rangeFactor);
+    phongShader->setFloat("ceilingAttQuadratic", 2.0f / (rangeFactor * rangeFactor));
+
+    phongShader->setInt("dynamicLightActive", lighting.dynamicLightActive ? 1 : 0);
+
+    if (lighting.dynamicLightActive) {
+        phongShader->setVec3("dynamicLightPos", lightProjectile.position);
+    }
+
+    phongShader->setVec3("dynamicLightColor", lighting.dynamicLightColor);
+    phongShader->setFloat("dynamicLightStrength", lighting.dynamicLightActive ? lighting.dynamicLightStrength : 0.0f);
+    phongShader->setInt("dynamicShadowActive", lighting.dynamicLightActive ? 1 : 0);
+
+    phongShader->setInt("beamLightCount",   lighting.beamCount);
+
+    for (int i = 0; i < lighting.beamCount; ++i) {
+        phongShader->setVec3("beamLightStarts[" + std::to_string(i) + "]", lighting.beamStarts[i]);
+        phongShader->setVec3("beamLightEnds[" + std::to_string(i) + "]", lighting.beamEnds[i]);
+        phongShader->setVec3("beamLightColors[" + std::to_string(i) + "]", lighting.beamColor);
+        phongShader->setFloat("beamLightStrengths[" + std::to_string(i) + "]", lighting.beamStrength);
+    }
+}
+
+void Game::renderStaticCubes(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const glm::vec3& cameraPosition,
+    const LightingRenderData& lighting
+) {
+    if (objects.empty() || !phongShader) {
+        return;
+    }
+
+    phongShader->use();
+    phongShader->setMat4("view", view);
+    phongShader->setMat4("projection", projection);
+    phongShader->setMat4("dynamicLightSpaceMatrix", shadowMap.getDynamicLightSpaceMatrix());
+    phongShader->setInt("dynamicShadowMap", 5);
+    phongShader->setVec3("viewPos", cameraPosition);
+
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, shadowMap.getDynamicTexture());
+    glActiveTexture(GL_TEXTURE0);
+
+    applyPhongLightingUniforms(lighting);
+    phongShader->setInt("useTexture", 0);
+    phongShader->setInt("diffuseMap", 0);
+    phongShader->setVec2("uvScale", glm::vec2(1.0f, 1.0f));
+    phongShader->setVec3("material.ambient", glm::vec3(0.10f));
+    phongShader->setVec3("material.diffuse", glm::vec3(1.0f));
+
+    for (size_t ci = 0; ci < extraCubeModels.size(); ++ci) {
+        const glm::mat4& cubeModel = extraCubeModels[ci];
+        const float sy = std::abs(cubeModel[1][1]);
+
         if (pillarDiffuseTexture.isValid()) {
-            glBindTexture(GL_TEXTURE_2D, 0);
-            phongShader->setInt("useTexture", 0);
+            const float sx = std::abs(cubeModel[0][0]);
+            const float sz = std::abs(cubeModel[2][2]);
+
+            phongShader->setInt("useTexture", 1);
+
+            if (sy < 1.0f) {
+                phongShader->setVec2("uvScale", glm::vec2(12.0f, 12.0f));
+            } else if (sx > 10.0f || sz > 10.0f) {
+                phongShader->setVec2("uvScale", glm::vec2(12.0f, 4.0f));
+            } else {
+                phongShader->setVec2("uvScale", glm::vec2(1.2f, 8.0f));
+            }
+
+            pillarDiffuseTexture.bind(0);
         }
+
+        phongShader->setMat4("model", cubeModel);
+        objects[0]->draw();
+    }
+
+    drawMovablePillarPhong(capturePillarModelMatrix);
+    drawMovablePillarPhong(deflectorPillarModelMatrix);
+
+    if (pillarDiffuseTexture.isValid()) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        phongShader->setInt("useTexture", 0);
+    }
+}
+
+void Game::renderGround(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const glm::vec3& cameraPosition,
+    const LightingRenderData& lighting
+) {
+    if (!groundObject || !phongShader) {
+        return;
     }
 
     phongShader->use();
@@ -444,116 +572,87 @@ void Game::renderSceneOpaque(
     phongShader->setMat4("dynamicLightSpaceMatrix", shadowMap.getDynamicLightSpaceMatrix());
     phongShader->setInt("dynamicShadowMap", 5);
     phongShader->setVec3("viewPos", cameraPosition);
+
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, shadowMap.getDynamicTexture());
     glActiveTexture(GL_TEXTURE0);
-    applyPhongLightingUniforms();
+
+    applyPhongLightingUniforms(lighting);
+
     phongShader->setInt("useTexture", groundDiffuseTexture.isValid() ? 1 : 0);
     phongShader->setInt("diffuseMap", 0);
     phongShader->setVec2("uvScale", glm::vec2(6.0f, 6.0f));
+
     if (groundDiffuseTexture.isValid()) {
         groundDiffuseTexture.bind(0);
     }
-    phongShader->setVec3("material.ambient", glm::vec3(0.13f, 0.13f, 0.13f));
-    phongShader->setVec3("material.diffuse", glm::vec3(0.19f, 0.19f, 0.19f));
+
+    phongShader->setVec3("material.ambient", glm::vec3(0.13f));
+    phongShader->setVec3("material.diffuse", glm::vec3(0.19f));
 
     glEnable(GL_STENCIL_TEST);
     glStencilMask(0xFF);
     glStencilFunc(GL_ALWAYS, 1, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+
     groundObject->draw();
+
     glStencilMask(0x00);
+
     if (groundDiffuseTexture.isValid()) {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
+}
+
+void Game::renderBeam(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const LightingRenderData& lighting
+) {
+    if (lighting.beamCount <= 0 || !lampShader || !lightMarker) {
+        return;
+    }
+
+    disableLampEdgeClip(lampShader.get());
+
+    BeamTrace beam;
+    beam.segmentCount = lighting.beamCount;
+
+    for (int i = 0; i < lighting.beamCount; ++i) {
+        beam.starts[i] = lighting.beamStarts[i];
+        beam.ends[i] = lighting.beamEnds[i];
+        beam.lengths[i] = glm::length(lighting.beamEnds[i] - lighting.beamStarts[i]);
+    }
+
+    beamRenderer.RenderBeam(
+        *lampShader,
+        *lightMarker,
+        view,
+        projection,
+        beam,
+        lighting.beamColor
+    );
+}
+
+void Game::renderSceneOpaque(
+    const glm::mat4& view,
+    const glm::mat4& projection,
+    const glm::vec3& cameraPosition
+) {
+    setupOpaqueRenderState();
+
+    const bool beamActive = lightProjectile.anchoredOnPillar && !lightProjectile.anchorAnimating;
+    LightingRenderData lighting = buildLightingRenderData(beamSourcePos);
+    renderStaticCubes(view, projection, cameraPosition, lighting);
+    renderGround(view, projection, cameraPosition, lighting);
     renderPlanarShadows(view, projection);
     glDisable(GL_STENCIL_TEST);
-
-    {
-        lampShader->use();
-        lampShader->setMat4("view", view);
-        lampShader->setMat4("projection", projection);
-        disableLampEdgeClip(lampShader.get());
-        const glm::vec3 lampColor = lightProjectile.active
-            ? glm::vec3(0.06f, 0.18f, 2.0f)
-            : dynamicLightColor;
-        const float lampScale = lightProjectile.active ? 0.22f : 0.12f;
-        lampShader->setVec3("lightColor", lampColor);
-
-        glm::mat4 lightModel = glm::mat4(1.0f);
-        lightModel = glm::translate(lightModel, lightProjectile.position);
-        lightModel = glm::scale(lightModel, glm::vec3(lampScale));
-        lampShader->setMat4("model", lightModel);
-        lightMarker->draw();
-    }
-
-    // Ground rail that guides the center pillar.
-    {
-        const glm::vec3 railIdle(0.10f, 0.18f, 0.32f);
-        const glm::vec3 railActive(0.30f, 0.60f, 1.00f);
-        const glm::vec3 railColor = beamActive ? railActive : railIdle;
-        lampShader->use();
-        lampShader->setMat4("view", view);
-        lampShader->setMat4("projection", projection);
-        disableLampEdgeClip(lampShader.get());
-        lampShader->setVec3("lightColor", railColor);
-        lampShader->setMat4("model", railModel);
-        lightMarker->draw();
-        // Deflector pillar rail, perpendicular to the previous one.
-        lampShader->setMat4("model", deflectorRailModel);
-        lightMarker->draw();
-    }
-
-    // East wall target: small dot + ring, dark at rest, blue after 3 seconds of
-    // continuous beam contact. Must be rendered before the beam so the beam does
-    // not visually cover it.
+    renderProjectileLight(view, projection, lighting.dynamicLightColor);
+    renderRails(view, projection, beamActive);
     renderBeamTarget(view, projection);
+    renderBeam(view, projection, lighting);
+    renderCeilingLight(view, projection);
 
-    if (beamCount > 0) {
-        disableLampEdgeClip(lampShader.get());
-
-        BeamTrace beam;
-        beam.segmentCount = beamCount;
-
-        for (int i = 0; i < beamCount; ++i) {
-            beam.starts[i] = beamStarts[i];
-            beam.ends[i] = beamEnds[i];
-            beam.lengths[i] = beamLengths[i];
-        }
-
-        beamRenderer.RenderBeam(
-            *lampShader,
-            *lightMarker,
-            view,
-            projection,
-            beam,
-            beamColor
-        );
-    }
-
-    // Yellow ceiling light marker.
-    lampShader->use();
-    lampShader->setMat4("view", view);
-    lampShader->setMat4("projection", projection);
-    disableLampEdgeClip(lampShader.get());
-    lampShader->setVec3("lightColor", ceilingLightColor);
-    glm::mat4 ceilingLightModel = glm::mat4(1.0f);
-    ceilingLightModel = glm::translate(ceilingLightModel, ceilingLightPosition);
-    ceilingLightModel = glm::scale(ceilingLightModel, glm::vec3(0.16f));
-    lampShader->setMat4("model", ceilingLightModel);
-    lightMarker->draw();
-
-    // Character proxy: a small yellow cube following the camera from behind.
-    lampShader->use();
-    lampShader->setMat4("view", view);
-    lampShader->setMat4("projection", projection);
-    disableLampEdgeClip(lampShader.get());
-    lampShader->setVec3("lightColor", glm::vec3(1.0f, 0.95f, 0.25f));
-    glm::mat4 playerModel = glm::mat4(1.0f);
-    playerModel = glm::translate(playerModel, playerWorldPosition);
-    playerModel = glm::scale(playerModel, glm::vec3(0.18f));
-    lampShader->setMat4("model", playerModel);
-    lightMarker->draw();
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
